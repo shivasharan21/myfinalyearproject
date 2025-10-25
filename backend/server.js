@@ -1,13 +1,22 @@
-// backend/server.js
+// backend/server.js (Updated)
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { spawn } = require('child_process');
+const http = require('http');
+const socketIO = require('socket.io');
 require('dotenv').config();
 
 const app = express();
+const server = http.createServer(app);
+const io = socketIO(server, {
+  cors: {
+    origin: process.env.CLIENT_URL || 'http://localhost:3000',
+    methods: ['GET', 'POST']
+  }
+});
 
 // Middleware
 app.use(cors());
@@ -24,7 +33,7 @@ const userSchema = new mongoose.Schema({
   email: { type: String, required: true, unique: true },
   password: { type: String, required: true },
   role: { type: String, enum: ['patient', 'doctor'], required: true },
-  specialization: { type: String }, // For doctors
+  specialization: { type: String },
   phone: { type: String },
   createdAt: { type: Date, default: Date.now }
 });
@@ -63,6 +72,55 @@ const diabetesPredictionSchema = new mongoose.Schema({
 });
 
 const DiabetesPrediction = mongoose.model('DiabetesPrediction', diabetesPredictionSchema);
+
+// Store user socket mappings
+const userSockets = new Map();
+
+// Socket.IO Connection Handler
+io.on('connection', (socket) => {
+  console.log('New client connected:', socket.id);
+
+  socket.on('user:online', (userId) => {
+    userSockets.set(userId, socket.id);
+    console.log(`User ${userId} is online with socket ${socket.id}`);
+  });
+
+  socket.on('disconnect', () => {
+    // Remove user from online map
+    for (let [userId, socketId] of userSockets.entries()) {
+      if (socketId === socket.id) {
+        userSockets.delete(userId);
+        console.log(`User ${userId} went offline`);
+      }
+    }
+  });
+});
+
+// Helper function to broadcast appointment updates
+const broadcastAppointmentUpdate = async (appointment, eventType) => {
+  // Populate the appointment details
+  const populatedApt = await Appointment.findById(appointment._id)
+    .populate('patientId', 'name email phone')
+    .populate('doctorId', 'name email specialization');
+
+  // Notify patient
+  if (userSockets.has(populatedApt.patientId._id.toString())) {
+    const socketId = userSockets.get(populatedApt.patientId._id.toString());
+    io.to(socketId).emit('appointment:updated', {
+      type: eventType,
+      appointment: populatedApt
+    });
+  }
+
+  // Notify doctor
+  if (userSockets.has(populatedApt.doctorId._id.toString())) {
+    const socketId = userSockets.get(populatedApt.doctorId._id.toString());
+    io.to(socketId).emit('appointment:updated', {
+      type: eventType,
+      appointment: populatedApt
+    });
+  }
+};
 
 // Auth Middleware
 const authMiddleware = (req, res, next) => {
@@ -207,6 +265,10 @@ app.post('/api/appointments', authMiddleware, async (req, res) => {
     });
 
     await appointment.save();
+
+    // Broadcast to both patient and doctor
+    await broadcastAppointmentUpdate(appointment, 'created');
+
     res.status(201).json(appointment);
   } catch (error) {
     res.status(500).json({ error: 'Failed to create appointment', details: error.message });
@@ -240,6 +302,10 @@ app.patch('/api/appointments/:id', authMiddleware, async (req, res) => {
       { status },
       { new: true }
     );
+
+    // Broadcast status update
+    await broadcastAppointmentUpdate(appointment, 'updated');
+
     res.json(appointment);
   } catch (error) {
     res.status(500).json({ error: 'Failed to update appointment' });
@@ -251,7 +317,6 @@ app.post('/api/predict-diabetes', authMiddleware, async (req, res) => {
   try {
     const inputData = req.body;
     
-    // Call Python script for prediction
     const pythonCmd = process.env.PYTHON_CMD || 'python';
     const python = spawn(pythonCmd, ['ml_model/predict.py', JSON.stringify(inputData)]);
     
@@ -274,7 +339,6 @@ app.post('/api/predict-diabetes', authMiddleware, async (req, res) => {
       try {
         const prediction = JSON.parse(result);
         
-        // Save prediction to database
         const diabetesPrediction = new DiabetesPrediction({
           userId: req.userId,
           ...inputData,
@@ -283,7 +347,6 @@ app.post('/api/predict-diabetes', authMiddleware, async (req, res) => {
         });
 
         await diabetesPrediction.save();
-
         res.json(prediction);
       } catch (parseError) {
         res.status(500).json({ error: 'Failed to parse prediction result' });
@@ -346,6 +409,6 @@ app.get('/api/stats', authMiddleware, async (req, res) => {
 });
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
+server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });

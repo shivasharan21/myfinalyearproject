@@ -1,6 +1,7 @@
-// frontend/src/pages/DoctorDashboard.jsx
+// frontend/src/pages/DoctorDashboard.jsx (Updated)
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import websocketService from '../services/websocket';
 import axios from 'axios';
 
 function DoctorDashboard() {
@@ -12,7 +13,23 @@ function DoctorDashboard() {
 
   useEffect(() => {
     fetchDashboardData();
-  }, []);
+    
+    // Register user for real-time updates
+    websocketService.connect(API_URL.replace('/api', ''));
+    websocketService.emit('user:online', user?.id);
+
+    // Listen for appointment updates
+    const handleAppointmentUpdate = (data) => {
+      console.log('Appointment update received:', data);
+      fetchDashboardData();
+    };
+
+    websocketService.on('appointment:updated', handleAppointmentUpdate);
+
+    return () => {
+      websocketService.off('appointment:updated', handleAppointmentUpdate);
+    };
+  }, [user?.id, API_URL]);
 
   const fetchDashboardData = async () => {
     try {
@@ -33,7 +50,7 @@ function DoctorDashboard() {
   const updateAppointmentStatus = async (appointmentId, status) => {
     try {
       await axios.patch(`${API_URL}/appointments/${appointmentId}`, { status });
-      fetchDashboardData();
+      // Real-time update will be triggered via WebSocket
     } catch (error) {
       console.error('Failed to update appointment:', error);
     }
@@ -163,6 +180,14 @@ function Overview({ stats, appointments }) {
 
   const pendingAppointments = appointments.filter(apt => apt.status === 'pending').slice(0, 5);
 
+  const updateStatus = async (appointmentId, status) => {
+    try {
+      await axios.patch(`${API_URL}/appointments/${appointmentId}`, { status });
+    } catch (error) {
+      console.error('Failed to update appointment:', error);
+    }
+  };
+
   return (
     <div>
       <h2 className="text-3xl font-bold text-gray-800 mb-6">Dashboard Overview</h2>
@@ -271,13 +296,13 @@ function Overview({ stats, appointments }) {
                   </div>
                   <div className="flex space-x-2 mt-3">
                     <button
-                      onClick={() => updateAppointmentStatus(apt._id, 'confirmed')}
+                      onClick={() => updateStatus(apt._id, 'confirmed')}
                       className="flex-1 px-3 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 transition"
                     >
                       Confirm
                     </button>
                     <button
-                      onClick={() => updateAppointmentStatus(apt._id, 'cancelled')}
+                      onClick={() => updateStatus(apt._id, 'cancelled')}
                       className="flex-1 px-3 py-2 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700 transition"
                     >
                       Decline
@@ -372,13 +397,13 @@ function AppointmentManagement({ appointments, onUpdateStatus }) {
                         <div className="flex space-x-2">
                           <button
                             onClick={() => onUpdateStatus(apt._id, 'confirmed')}
-                            className="text-green-600 hover:text-green-900"
+                            className="text-green-600 hover:text-green-900 font-medium"
                           >
                             Confirm
                           </button>
                           <button
                             onClick={() => onUpdateStatus(apt._id, 'cancelled')}
-                            className="text-red-600 hover:text-red-900"
+                            className="text-red-600 hover:text-red-900 font-medium"
                           >
                             Cancel
                           </button>
@@ -387,7 +412,7 @@ function AppointmentManagement({ appointments, onUpdateStatus }) {
                       {apt.status === 'confirmed' && (
                         <button
                           onClick={() => onUpdateStatus(apt._id, 'completed')}
-                          className="text-blue-600 hover:text-blue-900"
+                          className="text-blue-600 hover:text-blue-900 font-medium"
                         >
                           Mark Complete
                         </button>
@@ -406,6 +431,7 @@ function AppointmentManagement({ appointments, onUpdateStatus }) {
 
 // Patient List Component
 function PatientList({ appointments }) {
+  const { API_URL } = useAuth();
   const uniquePatients = {};
   appointments.forEach(apt => {
     if (apt.patientId && !uniquePatients[apt.patientId._id]) {

@@ -1,6 +1,7 @@
-// frontend/src/pages/PatientDashboard.jsx
+// frontend/src/pages/PatientDashboard.jsx (Updated)
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import websocketService from '../services/websocket';
 import axios from 'axios';
 import DiabetesPrediction from '../components/DiabetesPrediction';
 import AppointmentBooking from '../components/AppointmentBooking';
@@ -14,6 +15,26 @@ function PatientDashboard() {
 
   useEffect(() => {
     fetchDashboardData();
+    
+    // WebSocket is already connected in AuthContext, just listen for updates
+    const handleAppointmentUpdate = (data) => {
+      console.log('Appointment update received:', data);
+      fetchDashboardData();
+    };
+
+    try {
+      websocketService.on('appointment:updated', handleAppointmentUpdate);
+    } catch (error) {
+      console.warn('WebSocket listener setup warning:', error);
+    }
+
+    return () => {
+      try {
+        websocketService.off('appointment:updated', handleAppointmentUpdate);
+      } catch (error) {
+        console.warn('WebSocket listener cleanup warning:', error);
+      }
+    };
   }, []);
 
   const fetchDashboardData = async () => {

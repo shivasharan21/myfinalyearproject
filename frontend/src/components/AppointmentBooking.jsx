@@ -1,10 +1,11 @@
-// frontend/src/components/AppointmentBooking.jsx
+// frontend/src/components/AppointmentBooking.jsx (Updated)
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import websocketService from '../services/websocket';
 import axios from 'axios';
 
 function AppointmentBooking({ onBookingComplete }) {
-  const { API_URL } = useAuth();
+  const { API_URL, user } = useAuth();
   const [doctors, setDoctors] = useState([]);
   const [selectedDoctor, setSelectedDoctor] = useState(null);
   const [formData, setFormData] = useState({
@@ -18,6 +19,20 @@ function AppointmentBooking({ onBookingComplete }) {
 
   useEffect(() => {
     fetchDoctors();
+    
+    // Listen for real-time appointment updates
+    websocketService.onAppointmentUpdated((data) => {
+      if (data.type === 'created' || data.type === 'updated') {
+        // Refresh data if needed
+        if (onBookingComplete) {
+          onBookingComplete();
+        }
+      }
+    });
+
+    return () => {
+      websocketService.off('appointment:updated');
+    };
   }, []);
 
   const fetchDoctors = async () => {
@@ -48,7 +63,7 @@ function AppointmentBooking({ onBookingComplete }) {
     setLoading(true);
 
     try {
-      await axios.post(`${API_URL}/appointments`, {
+      const response = await axios.post(`${API_URL}/appointments`, {
         doctorId: selectedDoctor._id,
         ...formData
       });
@@ -57,9 +72,8 @@ function AppointmentBooking({ onBookingComplete }) {
       setFormData({ date: '', time: '', reason: '' });
       setSelectedDoctor(null);
       
-      if (onBookingComplete) {
-        onBookingComplete();
-      }
+      // Real-time update will trigger via WebSocket
+      // No need to manually call onBookingComplete
 
       setTimeout(() => setSuccess(false), 5000);
     } catch (error) {
@@ -239,7 +253,8 @@ function AppointmentBooking({ onBookingComplete }) {
                 <svg className="w-4 h-4 mr-2 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
                   <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
                 </svg>
-                <span>Appointments are subject to doctor availability</span>
+                <span>Please arrive 10 minutes before your scheduled time</span>
+                  <span>Appointments are subject to doctor availability</span>
               </li>
               <li className="flex items-start">
                 <svg className="w-4 h-4 mr-2 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
@@ -251,7 +266,6 @@ function AppointmentBooking({ onBookingComplete }) {
                 <svg className="w-4 h-4 mr-2 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
                   <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
                 </svg>
-                <span>Please arrive 10 minutes before your scheduled time</span>
               </li>
             </ul>
           </div>
@@ -262,3 +276,4 @@ function AppointmentBooking({ onBookingComplete }) {
 }
 
 export default AppointmentBooking;
+              
