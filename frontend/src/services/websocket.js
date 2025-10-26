@@ -1,4 +1,4 @@
-// frontend/src/services/websocket.js
+// frontend/src/services/websocket.js (Enhanced with Video Call Support)
 import io from 'socket.io-client';
 
 class WebSocketService {
@@ -67,6 +67,51 @@ class WebSocketService {
 
   onAppointmentUpdated(callback) {
     this.on('appointment:updated', callback);
+  }
+
+  // Video call events
+  initiateCall(data) {
+    this.emit('call:initiate', data);
+  }
+
+  answerCall(data) {
+    this.emit('call:answer', data);
+  }
+
+  sendICECandidate(data) {
+    this.emit('call:ice-candidate', data);
+  }
+
+  rejectCall(data) {
+    this.emit('call:reject', data);
+  }
+
+  endCall(data) {
+    this.emit('call:end', data);
+  }
+
+  onCallInitiate(callback) {
+    this.on('call:initiate', callback);
+  }
+
+  onCallIncoming(callback) {
+    this.on('call:incoming', callback);
+  }
+
+  onCallAnswered(callback) {
+    this.on('call:answered', callback);
+  }
+
+  onICECandidate(callback) {
+    this.on('call:ice-candidate', callback);
+  }
+
+  onCallRejected(callback) {
+    this.on('call:rejected', callback);
+  }
+
+  onCallEnded(callback) {
+    this.on('call:ended', callback);
   }
 
   // Stats update events

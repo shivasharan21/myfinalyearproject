@@ -1,4 +1,4 @@
-// backend/server.js (Updated)
+// backend/server.js (Updated with Video Calling)
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -24,8 +24,50 @@ app.use(express.json());
 
 // MongoDB Connection
 mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/telemedicine')
-  .then(() => console.log('Connected to MongoDB'))
+  .then(() => {
+    console.log('Connected to MongoDB');
+    // Create default test users
+    createDefaultUsers();
+  })
   .catch((err) => console.error('MongoDB connection error:', err));
+
+// Function to create default test users
+async function createDefaultUsers() {
+  try {
+    // Check if test users already exist
+    const testDoctor = await User.findOne({ email: 'doctor@test.com' });
+    const testPatient = await User.findOne({ email: 'patient@test.com' });
+
+    if (!testDoctor) {
+      const hashedDoctorPassword = await bcrypt.hash('doctor123', 10);
+      const doctor = new User({
+        name: 'Dr. James Wilson',
+        email: 'doctor@test.com',
+        password: hashedDoctorPassword,
+        role: 'doctor',
+        specialization: 'General Practitioner',
+        phone: '+1-555-0100'
+      });
+      await doctor.save();
+      console.log('✓ Default doctor user created: doctor@test.com (password: doctor123)');
+    }
+
+    if (!testPatient) {
+      const hashedPatientPassword = await bcrypt.hash('patient123', 10);
+      const patient = new User({
+        name: 'John Smith',
+        email: 'patient@test.com',
+        password: hashedPatientPassword,
+        role: 'patient',
+        phone: '+1-555-0101'
+      });
+      await patient.save();
+      console.log('✓ Default patient user created: patient@test.com (password: patient123)');
+    }
+  } catch (error) {
+    console.error('Error creating default users:', error);
+  }
+}
 
 // User Schema
 const userSchema = new mongoose.Schema({
@@ -75,6 +117,8 @@ const DiabetesPrediction = mongoose.model('DiabetesPrediction', diabetesPredicti
 
 // Store user socket mappings
 const userSockets = new Map();
+// Store active video calls
+const activeCalls = new Map();
 
 // Socket.IO Connection Handler
 io.on('connection', (socket) => {
@@ -85,8 +129,105 @@ io.on('connection', (socket) => {
     console.log(`User ${userId} is online with socket ${socket.id}`);
   });
 
+  // Video Call Events
+  socket.on('call:initiate', (data) => {
+    const { appointmentId, callerId, callerName, receiverId, offer } = data;
+    const receiverSocketId = userSockets.get(receiverId);
+    
+    console.log(`Call initiated: ${callerId} -> ${receiverId}`);
+    
+    if (receiverSocketId) {
+      activeCalls.set(appointmentId, {
+        callerId,
+        receiverId,
+        startTime: new Date(),
+        status: 'ringing'
+      });
+      
+      io.to(receiverSocketId).emit('call:incoming', {
+        appointmentId,
+        callerId,
+        callerName,
+        offer: offer
+      });
+      console.log(`Call:incoming sent to receiver socket: ${receiverSocketId}`);
+    } else {
+      console.log(`Receiver not found for call: ${receiverId}`);
+      io.to(socket.id).emit('call:rejected', { 
+        appointmentId,
+        reason: 'Receiver offline'
+      });
+    }
+  });
+
+  socket.on('call:answer', (data) => {
+    const { appointmentId, answer } = data;
+    const callData = activeCalls.get(appointmentId);
+    
+    console.log(`Call answer received for appointment: ${appointmentId}`);
+    
+    if (callData) {
+      callData.status = 'active';
+      const callerSocketId = userSockets.get(callData.callerId);
+      
+      if (callerSocketId) {
+        io.to(callerSocketId).emit('call:answered', {
+          appointmentId,
+          answer: answer
+        });
+        console.log(`Call:answered sent to caller socket: ${callerSocketId}`);
+      }
+    }
+  });
+
+  socket.on('call:ice-candidate', (data) => {
+    const { appointmentId, candidate, senderId } = data;
+    const callData = activeCalls.get(appointmentId);
+    
+    if (callData) {
+      const receiverId = senderId === callData.callerId ? callData.receiverId : callData.callerId;
+      const receiverSocketId = userSockets.get(receiverId);
+      
+      if (receiverSocketId) {
+        io.to(receiverSocketId).emit('call:ice-candidate', {
+          appointmentId,
+          candidate
+        });
+      }
+    }
+  });
+
+  socket.on('call:reject', (data) => {
+    const { appointmentId } = data;
+    const callData = activeCalls.get(appointmentId);
+    
+    if (callData) {
+      const otherUserId = data.userId === callData.callerId ? callData.receiverId : callData.callerId;
+      const otherSocketId = userSockets.get(otherUserId);
+      
+      if (otherSocketId) {
+        io.to(otherSocketId).emit('call:rejected', { appointmentId });
+      }
+      activeCalls.delete(appointmentId);
+    }
+  });
+
+  socket.on('call:end', (data) => {
+    const { appointmentId } = data;
+    const callData = activeCalls.get(appointmentId);
+    
+    if (callData) {
+      const otherUserId = data.userId === callData.callerId ? callData.receiverId : callData.callerId;
+      const otherSocketId = userSockets.get(otherUserId);
+      
+      if (otherSocketId) {
+        io.to(otherSocketId).emit('call:ended', { appointmentId });
+      }
+      activeCalls.delete(appointmentId);
+    }
+  });
+
   socket.on('disconnect', () => {
-    // Remove user from online map
     for (let [userId, socketId] of userSockets.entries()) {
       if (socketId === socket.id) {
         userSockets.delete(userId);
@@ -98,12 +239,10 @@ io.on('connection', (socket) => {
 
 // Helper function to broadcast appointment updates
 const broadcastAppointmentUpdate = async (appointment, eventType) => {
-  // Populate the appointment details
   const populatedApt = await Appointment.findById(appointment._id)
     .populate('patientId', 'name email phone')
     .populate('doctorId', 'name email specialization');
 
-  // Notify patient
   if (userSockets.has(populatedApt.patientId._id.toString())) {
     const socketId = userSockets.get(populatedApt.patientId._id.toString());
     io.to(socketId).emit('appointment:updated', {
@@ -112,7 +251,6 @@ const broadcastAppointmentUpdate = async (appointment, eventType) => {
     });
   }
 
-  // Notify doctor
   if (userSockets.has(populatedApt.doctorId._id.toString())) {
     const socketId = userSockets.get(populatedApt.doctorId._id.toString());
     io.to(socketId).emit('appointment:updated', {
@@ -266,7 +404,6 @@ app.post('/api/appointments', authMiddleware, async (req, res) => {
 
     await appointment.save();
 
-    // Broadcast to both patient and doctor
     await broadcastAppointmentUpdate(appointment, 'created');
 
     res.status(201).json(appointment);
@@ -303,7 +440,6 @@ app.patch('/api/appointments/:id', authMiddleware, async (req, res) => {
       { new: true }
     );
 
-    // Broadcast status update
     await broadcastAppointmentUpdate(appointment, 'updated');
 
     res.json(appointment);

@@ -1,7 +1,8 @@
-// frontend/src/pages/DoctorDashboard.jsx (Updated)
+// frontend/src/pages/DoctorDashboard.jsx (Updated with Video Call)
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import websocketService from '../services/websocket';
+import VideoCall from '../components/VideoCall';
 import axios from 'axios';
 
 function DoctorDashboard() {
@@ -10,15 +11,14 @@ function DoctorDashboard() {
   const [stats, setStats] = useState(null);
   const [appointments, setAppointments] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [activeCall, setActiveCall] = useState(null);
 
   useEffect(() => {
     fetchDashboardData();
     
-    // Register user for real-time updates
     websocketService.connect(API_URL.replace('/api', ''));
     websocketService.emit('user:online', user?.id);
 
-    // Listen for appointment updates
     const handleAppointmentUpdate = (data) => {
       console.log('Appointment update received:', data);
       fetchDashboardData();
@@ -50,128 +50,149 @@ function DoctorDashboard() {
   const updateAppointmentStatus = async (appointmentId, status) => {
     try {
       await axios.patch(`${API_URL}/appointments/${appointmentId}`, { status });
-      // Real-time update will be triggered via WebSocket
     } catch (error) {
       console.error('Failed to update appointment:', error);
     }
   };
 
+  const startVideoCall = (appointment) => {
+    setActiveCall({
+      appointmentId: appointment._id,
+      otherUserId: appointment.patientId._id,
+      otherUserName: appointment.patientName,
+      isDoctor: true
+    });
+  };
+
   const renderContent = () => {
     switch (activeTab) {
       case 'overview':
-        return <Overview stats={stats} appointments={appointments} />;
+        return <Overview stats={stats} appointments={appointments} onStartCall={startVideoCall} />;
       case 'appointments':
         return (
           <AppointmentManagement 
             appointments={appointments} 
             onUpdateStatus={updateAppointmentStatus}
+            onStartCall={startVideoCall}
           />
         );
       case 'patients':
         return <PatientList appointments={appointments} />;
       default:
-        return <Overview stats={stats} appointments={appointments} />;
+        return <Overview stats={stats} appointments={appointments} onStartCall={startVideoCall} />;
     }
   };
 
   return (
-    <div className="flex h-screen bg-gray-100">
-      {/* Sidebar */}
-      <div className="w-64 bg-white shadow-lg">
-        <div className="p-6 border-b">
-          <h1 className="text-2xl font-bold text-blue-600">TeleMed</h1>
-          <p className="text-sm text-gray-600 mt-1">Doctor Portal</p>
-        </div>
-
-        <div className="p-4">
-          <div className="mb-6">
-            <div className="flex items-center space-x-3 p-3 bg-blue-50 rounded-lg">
-              <div className="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center text-white font-semibold">
-                Dr
-              </div>
-              <div>
-                <p className="font-semibold text-gray-800">{user?.name}</p>
-                <p className="text-xs text-gray-600">{user?.specialization}</p>
-              </div>
-            </div>
+    <>
+      {activeCall && (
+        <VideoCall
+          appointmentId={activeCall.appointmentId}
+          otherUserId={activeCall.otherUserId}
+          otherUserName={activeCall.otherUserName}
+          isDoctor={activeCall.isDoctor}
+          onCallEnd={() => {
+            setActiveCall(null);
+            fetchDashboardData();
+          }}
+        />
+      )}
+      
+      <div className="flex h-screen bg-gray-100">
+        <div className="w-64 bg-white shadow-lg">
+          <div className="p-6 border-b">
+            <h1 className="text-2xl font-bold text-blue-600">TeleMed</h1>
+            <p className="text-sm text-gray-600 mt-1">Doctor Portal</p>
           </div>
 
-          <nav className="space-y-2">
-            <button
-              onClick={() => setActiveTab('overview')}
-              className={`w-full text-left px-4 py-3 rounded-lg flex items-center space-x-3 transition ${
-                activeTab === 'overview'
-                  ? 'bg-blue-600 text-white'
-                  : 'text-gray-700 hover:bg-gray-100'
-              }`}
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
-              </svg>
-              <span>Overview</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('appointments')}
-              className={`w-full text-left px-4 py-3 rounded-lg flex items-center space-x-3 transition ${
-                activeTab === 'appointments'
-                  ? 'bg-blue-600 text-white'
-                  : 'text-gray-700 hover:bg-gray-100'
-              }`}
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-              </svg>
-              <span>Appointments</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('patients')}
-              className={`w-full text-left px-4 py-3 rounded-lg flex items-center space-x-3 transition ${
-                activeTab === 'patients'
-                  ? 'bg-blue-600 text-white'
-                  : 'text-gray-700 hover:bg-gray-100'
-              }`}
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-              </svg>
-              <span>Patients</span>
-            </button>
-          </nav>
-        </div>
-
-        <div className="absolute bottom-0 w-64 p-4 border-t">
-          <button
-            onClick={logout}
-            className="w-full px-4 py-3 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition flex items-center justify-center space-x-2"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-            </svg>
-            <span>Logout</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Main Content */}
-      <div className="flex-1 overflow-auto">
-        <div className="p-8">
-          {loading ? (
-            <div className="flex items-center justify-center h-64">
-              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+          <div className="p-4">
+            <div className="mb-6">
+              <div className="flex items-center space-x-3 p-3 bg-blue-50 rounded-lg">
+                <div className="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center text-white font-semibold">
+                  Dr
+                </div>
+                <div>
+                  <p className="font-semibold text-gray-800">{user?.name}</p>
+                  <p className="text-xs text-gray-600">{user?.specialization}</p>
+                </div>
+              </div>
             </div>
-          ) : (
-            renderContent()
-          )}
+
+            <nav className="space-y-2">
+              <button
+                onClick={() => setActiveTab('overview')}
+                className={`w-full text-left px-4 py-3 rounded-lg flex items-center space-x-3 transition ${
+                  activeTab === 'overview'
+                    ? 'bg-blue-600 text-white'
+                    : 'text-gray-700 hover:bg-gray-100'
+                }`}
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+                </svg>
+                <span>Overview</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('appointments')}
+                className={`w-full text-left px-4 py-3 rounded-lg flex items-center space-x-3 transition ${
+                  activeTab === 'appointments'
+                    ? 'bg-blue-600 text-white'
+                    : 'text-gray-700 hover:bg-gray-100'
+                }`}
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+                <span>Appointments</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('patients')}
+                className={`w-full text-left px-4 py-3 rounded-lg flex items-center space-x-3 transition ${
+                  activeTab === 'patients'
+                    ? 'bg-blue-600 text-white'
+                    : 'text-gray-700 hover:bg-gray-100'
+                }`}
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                </svg>
+                <span>Patients</span>
+              </button>
+            </nav>
+          </div>
+
+          <div className="absolute bottom-0 w-64 p-4 border-t">
+            <button
+              onClick={logout}
+              className="w-full px-4 py-3 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition flex items-center justify-center space-x-2"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+              </svg>
+              <span>Logout</span>
+            </button>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-auto">
+          <div className="p-8">
+            {loading ? (
+              <div className="flex items-center justify-center h-64">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+              </div>
+            ) : (
+              renderContent()
+            )}
+          </div>
         </div>
       </div>
-    </div>
+    </>
   );
 }
 
-// Overview Component
-function Overview({ stats, appointments }) {
+function Overview({ stats, appointments, onStartCall }) {
   const todayAppointments = appointments.filter(apt => {
     const today = new Date();
     const aptDate = new Date(apt.date);
@@ -237,7 +258,6 @@ function Overview({ stats, appointments }) {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Today's Schedule */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
           <h3 className="text-xl font-bold text-gray-800 mb-4">Today's Schedule</h3>
           {todayAppointments.length === 0 ? (
@@ -255,21 +275,33 @@ function Overview({ stats, appointments }) {
                     <p className="font-semibold text-gray-800">{apt.patientName}</p>
                     <p className="text-sm text-gray-600">{apt.time}</p>
                   </div>
-                  <span className={`px-3 py-1 rounded-full text-xs font-medium ${
-                    apt.status === 'confirmed' ? 'bg-green-100 text-green-700' :
-                    apt.status === 'pending' ? 'bg-yellow-100 text-yellow-700' :
-                    apt.status === 'completed' ? 'bg-blue-100 text-blue-700' :
-                    'bg-gray-100 text-gray-700'
-                  }`}>
-                    {apt.status}
-                  </span>
+                  <div className="flex items-center space-x-2">
+                    <span className={`px-3 py-1 rounded-full text-xs font-medium ${
+                      apt.status === 'confirmed' ? 'bg-green-100 text-green-700' :
+                      apt.status === 'pending' ? 'bg-yellow-100 text-yellow-700' :
+                      apt.status === 'completed' ? 'bg-blue-100 text-blue-700' :
+                      'bg-gray-100 text-gray-700'
+                    }`}>
+                      {apt.status}
+                    </span>
+                    {apt.status === 'confirmed' && (
+                      <button
+                        onClick={() => onStartCall(apt)}
+                        className="p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+                        title="Start video call"
+                      >
+                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                          <path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1v-5zM8 7a1 1 0 011-1h2a1 1 0 011 1v9a1 1 0 01-1 1H9a1 1 0 01-1-1V7zM14 4a1 1 0 011-1h2a1 1 0 011 1v12a1 1 0 01-1 1h-2a1 1 0 01-1-1V4z" />
+                        </svg>
+                      </button>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
           )}
         </div>
 
-        {/* Pending Appointments */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
           <h3 className="text-xl font-bold text-gray-800 mb-4">Pending Approvals</h3>
           {pendingAppointments.length === 0 ? (
@@ -318,8 +350,7 @@ function Overview({ stats, appointments }) {
   );
 }
 
-// Appointment Management Component
-function AppointmentManagement({ appointments, onUpdateStatus }) {
+function AppointmentManagement({ appointments, onUpdateStatus, onStartCall }) {
   const [filter, setFilter] = useState('all');
 
   const filteredAppointments = appointments.filter(apt => {
@@ -392,7 +423,7 @@ function AppointmentManagement({ appointments, onUpdateStatus }) {
                         {apt.status}
                       </span>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm">
+                    <td className="px-6 py-4 whitespace-nowrap text-sm space-x-2">
                       {apt.status === 'pending' && (
                         <div className="flex space-x-2">
                           <button
@@ -410,12 +441,20 @@ function AppointmentManagement({ appointments, onUpdateStatus }) {
                         </div>
                       )}
                       {apt.status === 'confirmed' && (
-                        <button
-                          onClick={() => onUpdateStatus(apt._id, 'completed')}
-                          className="text-blue-600 hover:text-blue-900 font-medium"
-                        >
-                          Mark Complete
-                        </button>
+                        <div className="flex space-x-2">
+                          <button
+                            onClick={() => onStartCall(apt)}
+                            className="text-blue-600 hover:text-blue-900 font-medium"
+                          >
+                            Call
+                          </button>
+                          <button
+                            onClick={() => onUpdateStatus(apt._id, 'completed')}
+                            className="text-purple-600 hover:text-purple-900 font-medium"
+                          >
+                            Complete
+                          </button>
+                        </div>
                       )}
                     </td>
                   </tr>
@@ -429,9 +468,7 @@ function AppointmentManagement({ appointments, onUpdateStatus }) {
   );
 }
 
-// Patient List Component
 function PatientList({ appointments }) {
-  const { API_URL } = useAuth();
   const uniquePatients = {};
   appointments.forEach(apt => {
     if (apt.patientId && !uniquePatients[apt.patientId._id]) {

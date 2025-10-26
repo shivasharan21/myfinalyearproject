@@ -151,6 +151,26 @@ function Login() {
             <p>Doctor: doctor@email.com / password123</p>
           </div>
         </div>
+
+        {process.env.NODE_ENV === 'development' && (
+          <div className="mt-6 p-4 bg-yellow-50 rounded-lg border border-yellow-200">
+            <p className="text-xs text-yellow-700 font-medium mb-2">Testing Shortcuts:</p>
+            <div className="flex space-x-4">
+              <button
+                onClick={() => navigate('/doctor-dashboard')}
+                className="flex-1 bg-yellow-500 text-white py-2 rounded-lg text-sm hover:bg-yellow-600 transition"
+              >
+                Test Doctor Dashboard
+              </button>
+              <button
+                onClick={() => navigate('/patient-dashboard')}
+                className="flex-1 bg-yellow-500 text-white py-2 rounded-lg text-sm hover:bg-yellow-600 transition"
+              >
+                Test Patient Dashboard
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
