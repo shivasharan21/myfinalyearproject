@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import websocketService from '../services/websocket';
+import { Video, VideoOff, Mic, MicOff, PhoneOff, Phone, PhoneCall, Users, Minimize2, Maximize2 } from 'lucide-react';
 
 function VideoCall({ appointmentId, otherUserId, otherUserName, isDoctor, onCallEnd }) {
   const { user } = useAuth();
@@ -11,6 +12,8 @@ function VideoCall({ appointmentId, otherUserId, otherUserName, isDoctor, onCall
   const [isAudioOn, setIsAudioOn] = useState(true);
   const [isVideoOn, setIsVideoOn] = useState(true);
   const [debugInfo, setDebugInfo] = useState('');
+  const [showDebug, setShowDebug] = useState(false);
+  const [isPipMinimized, setIsPipMinimized] = useState(false);
   
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
@@ -43,7 +46,6 @@ function VideoCall({ appointmentId, otherUserId, otherUserName, isDoctor, onCall
       
       localStreamRef.current = stream;
       
-      // Set local video with retry logic
       const setLocalVideoStream = () => {
         if (localVideoRef.current) {
           addDebugInfo('Setting local video stream on ref...');
@@ -88,7 +90,6 @@ function VideoCall({ appointmentId, otherUserId, otherUserName, isDoctor, onCall
             const remoteStream = event.streams[0];
             addDebugInfo(`Stream available with ${remoteStream.getTracks().length} tracks`);
             
-            // Use a direct approach without ref
             const setRemoteStream = () => {
               if (remoteVideoRef.current) {
                 addDebugInfo(`Setting remote video stream on ref`);
@@ -140,7 +141,6 @@ function VideoCall({ appointmentId, otherUserId, otherUserName, isDoctor, onCall
         }
       };
 
-      // Process any queued ICE candidates
       addDebugInfo(`Processing ${iceCandidateQueueRef.current.length} queued ICE candidates`);
       while (iceCandidateQueueRef.current.length > 0) {
         const queuedCandidate = iceCandidateQueueRef.current.shift();
@@ -278,7 +278,6 @@ function VideoCall({ appointmentId, otherUserId, otherUserName, isDoctor, onCall
     try {
       const { candidate } = data;
       
-      // If peer connection doesn't exist yet, queue the candidate
       if (!peerConnectionRef.current) {
         addDebugInfo(`Queueing ICE candidate (peer connection not ready yet)`);
         iceCandidateQueueRef.current.push(candidate);
@@ -351,7 +350,7 @@ function VideoCall({ appointmentId, otherUserId, otherUserName, isDoctor, onCall
       addDebugInfo('Peer connection closed');
     }
 
-    setCallDuration(0);
+    // Don't clear callDuration here - keep it for the ended state display
   };
 
   const startCallTimer = () => {
@@ -394,7 +393,6 @@ function VideoCall({ appointmentId, otherUserId, otherUserName, isDoctor, onCall
     }
   };
 
-  // Setup WebSocket listeners
   useEffect(() => {
     addDebugInfo(`Setting up WebSocket listeners (User: ${user.id}, Role: ${isDoctor ? 'Doctor' : 'Patient'})`);
 
@@ -433,14 +431,12 @@ function VideoCall({ appointmentId, otherUserId, otherUserName, isDoctor, onCall
     };
   }, [user.id, appointmentId, otherUserId, isDoctor]);
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
       cleanup();
     };
   }, []);
 
-  // Ensure video elements are ready
   useEffect(() => {
     if (localVideoRef.current) {
       addDebugInfo('✓ Local video ref is ready');
@@ -450,7 +446,6 @@ function VideoCall({ appointmentId, otherUserId, otherUserName, isDoctor, onCall
     }
   }, []);
 
-  // When call becomes active, ensure local stream is set
   useEffect(() => {
     if (callState === 'active' && localStreamRef.current && localVideoRef.current) {
       addDebugInfo('Call is active - ensuring local video stream is set...');
@@ -465,72 +460,149 @@ function VideoCall({ appointmentId, otherUserId, otherUserName, isDoctor, onCall
   }, [callState]);
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-95 flex flex-col items-center justify-center z-50">
+    <div className="fixed inset-0 bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex flex-col items-center justify-center z-50">
+      {/* Error Banner */}
       {error && (
-        <div className="absolute top-4 left-4 right-4 p-4 bg-red-500 text-white rounded-lg flex justify-between items-center z-50">
-          <span>{error}</span>
-          <button
-            onClick={() => setError('')}
-            className="ml-2 underline font-semibold"
-          >
-            Dismiss
-          </button>
-        </div>
-      )}
-
-      {/* Debug Info Panel */}
-      <div className="absolute top-20 right-4 bg-gray-900 bg-opacity-90 text-gray-300 p-4 rounded-lg max-w-xs max-h-96 overflow-y-auto text-xs font-mono">
-        <div className="font-bold text-blue-400 mb-2">Debug Info:</div>
-        <div className="whitespace-pre-wrap break-words">{debugInfo}</div>
-      </div>
-
-      {callState === 'idle' && (
-        <div className="text-center">
-          <h2 className="text-3xl font-bold text-white mb-4">Ready to call</h2>
-          <p className="text-gray-300 mb-8 text-lg">{otherUserName}</p>
-          <button
-            onClick={initiateCall}
-            className="px-8 py-4 bg-green-600 text-white rounded-lg hover:bg-green-700 text-lg font-semibold shadow-lg"
-          >
-            Start Video Call
-          </button>
-        </div>
-      )}
-
-      {callState === 'ringing' && !isDoctor && (
-        <div className="text-center">
-          <h2 className="text-3xl font-bold text-white mb-4 animate-pulse">Incoming call</h2>
-          <p className="text-gray-300 mb-8 text-lg">{otherUserName}</p>
-          <div className="flex gap-4 justify-center">
+        <div className="absolute top-6 left-1/2 transform -translate-x-1/2 z-50 animate-in slide-in-from-top duration-300">
+          <div className="bg-red-500 text-white px-6 py-4 rounded-2xl shadow-2xl flex items-center space-x-3 max-w-md">
+            <div className="bg-white bg-opacity-20 p-2 rounded-full">
+              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+              </svg>
+            </div>
+            <span className="flex-1 font-medium">{error}</span>
             <button
-              onClick={acceptCall}
-              className="px-8 py-4 bg-green-600 text-white rounded-lg hover:bg-green-700 text-lg font-semibold shadow-lg"
+              onClick={() => setError('')}
+              className="bg-white bg-opacity-20 hover:bg-opacity-30 px-3 py-1 rounded-lg text-sm font-semibold transition"
             >
-              Accept
-            </button>
-            <button
-              onClick={rejectCall}
-              className="px-8 py-4 bg-red-600 text-white rounded-lg hover:bg-red-700 text-lg font-semibold shadow-lg"
-            >
-              Reject
+              Dismiss
             </button>
           </div>
         </div>
       )}
 
+      {/* Debug Toggle Button */}
+      <button
+        onClick={() => setShowDebug(!showDebug)}
+        className="absolute top-6 right-6 bg-gray-800 bg-opacity-50 hover:bg-opacity-70 text-gray-300 p-3 rounded-full backdrop-blur-sm transition z-50"
+        title="Toggle debug info"
+      >
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+        </svg>
+      </button>
+
+      {/* Debug Info Panel */}
+      {showDebug && (
+        <div className="absolute top-20 right-6 bg-gray-900 bg-opacity-95 text-gray-300 p-4 rounded-2xl max-w-sm max-h-96 overflow-y-auto text-xs font-mono shadow-2xl backdrop-blur-lg border border-gray-700 z-40">
+          <div className="font-bold text-blue-400 mb-2 flex items-center justify-between">
+            <span>Debug Console</span>
+            <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+          </div>
+          <div className="whitespace-pre-wrap break-words">{debugInfo}</div>
+        </div>
+      )}
+
+      {/* Idle State */}
+      {callState === 'idle' && (
+        <div className="text-center animate-in fade-in zoom-in duration-500">
+          <div className="mb-8">
+            <div className="w-32 h-32 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center mx-auto mb-6 shadow-2xl">
+              <Users className="w-16 h-16 text-white" />
+            </div>
+            <h2 className="text-4xl font-bold text-white mb-2">Ready to Connect</h2>
+            <p className="text-gray-400 text-lg">Start a video call with</p>
+            <p className="text-blue-400 text-2xl font-semibold mt-2">{otherUserName}</p>
+          </div>
+          {isDoctor && (
+            <button
+              onClick={initiateCall}
+              className="group relative px-10 py-5 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-2xl hover:from-green-600 hover:to-green-700 text-lg font-semibold shadow-2xl transition-all duration-300 transform hover:scale-105"
+            >
+              <div className="flex items-center space-x-3">
+                <div className="bg-white bg-opacity-20 p-2 rounded-full group-hover:bg-opacity-30 transition">
+                  <Video className="w-6 h-6" />
+                </div>
+                <span>Start Video Call</span>
+              </div>
+            </button>
+          )}
+          {!isDoctor && (
+            <p className="text-gray-500 text-lg">Waiting for doctor to initiate call...</p>
+          )}
+        </div>
+      )}
+
+      {/* Ringing State - Incoming (Patient) */}
+      {callState === 'ringing' && !isDoctor && (
+        <div className="text-center animate-in fade-in zoom-in duration-500">
+          <div className="mb-8">
+            <div className="relative w-40 h-40 mx-auto mb-6">
+              <div className="absolute inset-0 bg-blue-500 rounded-full animate-ping opacity-75"></div>
+              <div className="relative w-40 h-40 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center shadow-2xl">
+                <PhoneCall className="w-20 h-20 text-white animate-pulse" />
+              </div>
+            </div>
+            <h2 className="text-4xl font-bold text-white mb-2 animate-pulse">Incoming Call</h2>
+            <p className="text-blue-400 text-2xl font-semibold mt-2">{otherUserName}</p>
+            <p className="text-gray-400 mt-1">wants to video call with you</p>
+          </div>
+          <div className="flex gap-6 justify-center">
+            <button
+              onClick={acceptCall}
+              className="group relative px-10 py-5 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-2xl hover:from-green-600 hover:to-green-700 text-lg font-semibold shadow-2xl transition-all duration-300 transform hover:scale-105"
+            >
+              <div className="flex items-center space-x-3">
+                <div className="bg-white bg-opacity-20 p-2 rounded-full group-hover:bg-opacity-30 transition">
+                  <Phone className="w-6 h-6" />
+                </div>
+                <span>Accept</span>
+              </div>
+            </button>
+            <button
+              onClick={rejectCall}
+              className="group relative px-10 py-5 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-2xl hover:from-red-600 hover:to-red-700 text-lg font-semibold shadow-2xl transition-all duration-300 transform hover:scale-105"
+            >
+              <div className="flex items-center space-x-3">
+                <div className="bg-white bg-opacity-20 p-2 rounded-full group-hover:bg-opacity-30 transition">
+                  <PhoneOff className="w-6 h-6" />
+                </div>
+                <span>Decline</span>
+              </div>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Ringing State - Outgoing (Doctor) */}
       {callState === 'ringing' && isDoctor && (
-        <div className="text-center">
-          <h2 className="text-3xl font-bold text-white mb-4 animate-pulse">Calling...</h2>
-          <p className="text-gray-300 mb-8 text-lg">{otherUserName}</p>
+        <div className="text-center animate-in fade-in zoom-in duration-500">
+          <div className="mb-8">
+            <div className="relative w-40 h-40 mx-auto mb-6">
+              <div className="absolute inset-0 bg-blue-500 rounded-full animate-ping opacity-75"></div>
+              <div className="relative w-40 h-40 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center shadow-2xl">
+                <PhoneCall className="w-20 h-20 text-white animate-pulse" />
+              </div>
+            </div>
+            <h2 className="text-4xl font-bold text-white mb-2 animate-pulse">Calling...</h2>
+            <p className="text-blue-400 text-2xl font-semibold mt-2">{otherUserName}</p>
+            <p className="text-gray-400 mt-1">Waiting for answer...</p>
+          </div>
           <button
             onClick={endCall}
-            className="px-8 py-4 bg-red-600 text-white rounded-lg hover:bg-red-700 text-lg font-semibold shadow-lg"
+            className="group relative px-10 py-5 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-2xl hover:from-red-600 hover:to-red-700 text-lg font-semibold shadow-2xl transition-all duration-300 transform hover:scale-105"
           >
-            End Call
+            <div className="flex items-center space-x-3">
+              <div className="bg-white bg-opacity-20 p-2 rounded-full group-hover:bg-opacity-30 transition">
+                <PhoneOff className="w-6 h-6" />
+              </div>
+              <span>Cancel Call</span>
+            </div>
           </button>
         </div>
       )}
 
+      {/* Active Call State */}
       {callState === 'active' && (
         <div className="w-full h-full relative bg-black">
           {/* Remote video (main) - full screen */}
@@ -545,80 +617,157 @@ function VideoCall({ appointmentId, otherUserId, otherUserName, isDoctor, onCall
             onPlay={() => addDebugInfo('✓ Remote video started playing')}
             onError={(e) => addDebugInfo(`✗ Remote video error: ${e.currentTarget.error?.message || 'Unknown'}`)}
             className="absolute inset-0 w-full h-full object-cover"
-            style={{ width: '100%', height: '100%' }}
           />
 
-          {/* Local video (PIP) - bottom right */}
-          <video
-            key="local-video"
-            ref={localVideoRef}
-            autoPlay={true}
-            playsInline={true}
-            muted={true}
-            controls={false}
-            onLoadedMetadata={() => addDebugInfo('✓ Local video metadata loaded')}
-            onPlay={() => addDebugInfo('✓ Local video started playing')}
-            onError={(e) => addDebugInfo(`✗ Local video error: ${e.currentTarget.error?.message || 'Unknown'}`)}
-            className="absolute bottom-20 right-6 w-32 h-24 bg-black rounded-lg overflow-hidden border-2 border-white shadow-lg z-10 object-cover"
-            style={{ width: '128px', height: '96px' }}
-          />
+          {/* Connection indicator */}
+          <div className="absolute top-6 left-6 bg-black bg-opacity-60 backdrop-blur-md px-4 py-2 rounded-full flex items-center space-x-2 z-10">
+            <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+            <span className="text-white text-sm font-medium">Connected</span>
+          </div>
+
+          {/* Participant name */}
+          <div className="absolute top-6 left-1/2 transform -translate-x-1/2 bg-black bg-opacity-60 backdrop-blur-md px-6 py-2 rounded-full z-10">
+            <span className="text-white text-sm font-medium">{otherUserName}</span>
+          </div>
+
+          {/* Local video (PIP) */}
+          <div className={`absolute ${isPipMinimized ? 'bottom-6 right-6' : 'bottom-32 right-8'} transition-all duration-300 z-10`}>
+            <div className="relative group">
+              <video
+                key="local-video"
+                ref={localVideoRef}
+                autoPlay={true}
+                playsInline={true}
+                muted={true}
+                controls={false}
+                onLoadedMetadata={() => addDebugInfo('✓ Local video metadata loaded')}
+                onPlay={() => addDebugInfo('✓ Local video started playing')}
+                onError={(e) => addDebugInfo(`✗ Local video error: ${e.currentTarget.error?.message || 'Unknown'}`)}
+                className={`bg-gray-900 rounded-2xl overflow-hidden border-2 border-white shadow-2xl object-cover transition-all duration-300 ${
+                  isPipMinimized ? 'w-32 h-24' : 'w-64 h-48'
+                }`}
+              />
+              <button
+                onClick={() => setIsPipMinimized(!isPipMinimized)}
+                className="absolute top-2 right-2 bg-black bg-opacity-60 hover:bg-opacity-80 text-white p-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition"
+              >
+                {isPipMinimized ? <Maximize2 className="w-4 h-4" /> : <Minimize2 className="w-4 h-4" />}
+              </button>
+              <div className="absolute bottom-2 left-2 bg-black bg-opacity-60 px-2 py-1 rounded-md">
+                <span className="text-white text-xs font-medium">You</span>
+              </div>
+            </div>
+          </div>
 
           {/* Call controls */}
-          <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 bg-gray-900 bg-opacity-80 px-6 py-4 rounded-lg flex items-center gap-6 backdrop-blur-sm">
-            <div className="text-white text-2xl font-bold min-w-20 text-center">
-              {formatDuration(callDuration)}
+          <div className="absolute bottom-8 left-1/2 transform -translate-x-1/2 z-20">
+            <div className="bg-gray-900 bg-opacity-90 backdrop-blur-xl px-8 py-6 rounded-3xl shadow-2xl border border-gray-700">
+              <div className="flex items-center gap-6">
+                {/* Timer */}
+                <div className="bg-gray-800 px-6 py-3 rounded-2xl min-w-28">
+                  <div className="flex items-center space-x-2">
+                    <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
+                    <span className="text-white text-xl font-bold font-mono tabular-nums">
+                      {formatDuration(callDuration)}
+                    </span>
+                  </div>
+                </div>
+                
+                {/* Audio Toggle */}
+                <button
+                  onClick={toggleAudio}
+                  className={`group relative p-4 rounded-2xl transition-all duration-300 transform hover:scale-110 ${
+                    isAudioOn
+                      ? 'bg-gray-700 hover:bg-gray-600'
+                      : 'bg-red-500 hover:bg-red-600'
+                  }`}
+                  title={isAudioOn ? 'Mute audio' : 'Unmute audio'}
+                >
+                  {isAudioOn ? (
+                    <Mic className="w-6 h-6 text-white" />
+                  ) : (
+                    <MicOff className="w-6 h-6 text-white" />
+                  )}
+                  <div className="absolute -bottom-8 left-1/2 transform -translate-x-1/2 bg-gray-800 px-2 py-1 rounded text-xs text-white whitespace-nowrap opacity-0 group-hover:opacity-100 transition pointer-events-none">
+                    {isAudioOn ? 'Mute' : 'Unmute'}
+                  </div>
+                </button>
+
+                {/* Video Toggle */}
+                <button
+                  onClick={toggleVideo}
+                  className={`group relative p-4 rounded-2xl transition-all duration-300 transform hover:scale-110 ${
+                    isVideoOn
+                      ? 'bg-gray-700 hover:bg-gray-600'
+                      : 'bg-red-500 hover:bg-red-600'
+                  }`}
+                  title={isVideoOn ? 'Turn off video' : 'Turn on video'}
+                >
+                  {isVideoOn ? (
+                    <Video className="w-6 h-6 text-white" />
+                  ) : (
+                    <VideoOff className="w-6 h-6 text-white" />
+                  )}
+                  <div className="absolute -bottom-8 left-1/2 transform -translate-x-1/2 bg-gray-800 px-2 py-1 rounded text-xs text-white whitespace-nowrap opacity-0 group-hover:opacity-100 transition pointer-events-none">
+                    {isVideoOn ? 'Stop Video' : 'Start Video'}
+                  </div>
+                </button>
+
+                {/* End Call */}
+                <button
+                  onClick={endCall}
+                  className="group relative p-4 rounded-2xl bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 transition-all duration-300 transform hover:scale-110 shadow-lg"
+                  title="End call"
+                >
+                  <PhoneOff className="w-6 h-6 text-white" />
+                  <div className="absolute -bottom-8 left-1/2 transform -translate-x-1/2 bg-gray-800 px-2 py-1 rounded text-xs text-white whitespace-nowrap opacity-0 group-hover:opacity-100 transition pointer-events-none">
+                    End Call
+                  </div>
+                </button>
+              </div>
             </div>
-            
-            <button
-              onClick={toggleAudio}
-              className={`p-3 rounded-full transition ${
-                isAudioOn
-                  ? 'bg-gray-700 hover:bg-gray-600'
-                  : 'bg-red-600 hover:bg-red-700'
-              }`}
-              title={isAudioOn ? 'Mute audio' : 'Unmute audio'}
-            >
-              <svg className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 20 20">
-                <path d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
-              </svg>
-            </button>
-
-            <button
-              onClick={toggleVideo}
-              className={`p-3 rounded-full transition ${
-                isVideoOn
-                  ? 'bg-gray-700 hover:bg-gray-600'
-                  : 'bg-red-600 hover:bg-red-700'
-              }`}
-              title={isVideoOn ? 'Turn off video' : 'Turn on video'}
-            >
-              <svg className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 20 20">
-                <path d="M2 6a2 2 0 012-2h12a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V6zM14.553 7.106A1 1 0 0014 8v4a1 1 0 00.553.894l2 1A1 1 0 0018 13V7a1 1 0 00-1.447-.894l-2 1z" />
-              </svg>
-            </button>
-
-            <button
-              onClick={endCall}
-              className="p-3 rounded-full bg-red-600 hover:bg-red-700 transition"
-              title="End call"
-            >
-              <svg className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M3.172 5.172a4 4 0 015.656 0L10 6.343l1.172-1.171a4 4 0 115.656 5.656L10 17.657l-6.828-6.829a4 4 0 010-5.656z" clipRule="evenodd" />
-              </svg>
-            </button>
           </div>
+
+          {/* Video status indicators */}
+          {!isVideoOn && (
+            <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-50 backdrop-blur-sm z-5">
+              <div className="text-center">
+                <div className="w-24 h-24 bg-gray-700 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <VideoOff className="w-12 h-12 text-gray-400" />
+                </div>
+                <p className="text-white text-lg font-medium">Your camera is off</p>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
+      {/* Ended State */}
       {callState === 'ended' && (
-        <div className="text-center">
-          <h2 className="text-3xl font-bold text-white mb-4">Call ended</h2>
-          <p className="text-gray-300 mb-2">Duration: {formatDuration(callDuration)}</p>
+        <div className="text-center animate-in fade-in zoom-in duration-500">
+          <div className="mb-8">
+            <div className="w-32 h-32 bg-gradient-to-br from-gray-700 to-gray-800 rounded-full flex items-center justify-center mx-auto mb-6 shadow-2xl">
+              <PhoneOff className="w-16 h-16 text-gray-400" />
+            </div>
+            <h2 className="text-4xl font-bold text-white mb-4">Call Ended</h2>
+            <div className="bg-gray-800 bg-opacity-50 backdrop-blur-sm px-6 py-3 rounded-2xl inline-block mb-2">
+              <p className="text-gray-300 text-sm">Call Duration</p>
+              <p className="text-white text-2xl font-bold font-mono">
+                {formatDuration(callDuration)}
+              </p>
+            </div>
+            <p className="text-gray-400 mt-4">Thank you for using TeleMed</p>
+          </div>
           <button
             onClick={() => onCallEnd && onCallEnd()}
-            className="px-8 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 mt-6 font-semibold"
+            className="group relative px-10 py-5 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-2xl hover:from-blue-600 hover:to-blue-700 text-lg font-semibold shadow-2xl transition-all duration-300 transform hover:scale-105"
           >
-            Close
+            <div className="flex items-center space-x-3">
+              <span>Close</span>
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </div>
           </button>
         </div>
       )}
