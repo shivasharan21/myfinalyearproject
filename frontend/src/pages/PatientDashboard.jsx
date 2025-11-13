@@ -1,4 +1,4 @@
-// frontend/src/pages/PatientDashboard.jsx (Updated with Video Call)
+// frontend/src/pages/PatientDashboard.jsx
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import websocketService from '../services/websocket';
@@ -93,22 +93,22 @@ function PatientDashboard() {
         />
       )}
       
-      <div className="flex h-screen bg-gray-100">
+      <div className="flex h-screen bg-gradient-to-br from-sky-50 to-slate-100">
         <div className="w-64 bg-white shadow-lg">
-          <div className="p-6 border-b">
-            <h1 className="text-2xl font-bold text-blue-600">TeleMed</h1>
-            <p className="text-sm text-gray-600 mt-1">Patient Portal</p>
+          <div className="p-6 border-b border-slate-200">
+            <h1 className="text-2xl font-bold text-sky-600">TeleMed</h1>
+            <p className="text-sm text-slate-600 mt-1">Patient Portal</p>
           </div>
 
           <div className="p-4">
             <div className="mb-6">
-              <div className="flex items-center space-x-3 p-3 bg-blue-50 rounded-lg">
-                <div className="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center text-white font-semibold">
+              <div className="flex items-center space-x-3 p-3 bg-sky-50 rounded-lg border border-sky-100">
+                <div className="w-10 h-10 bg-sky-600 rounded-full flex items-center justify-center text-white font-semibold">
                   {user?.name?.charAt(0)}
                 </div>
                 <div>
-                  <p className="font-semibold text-gray-800">{user?.name}</p>
-                  <p className="text-xs text-gray-600">{user?.email}</p>
+                  <p className="font-semibold text-slate-800">{user?.name}</p>
+                  <p className="text-xs text-slate-600">{user?.email}</p>
                 </div>
               </div>
             </div>
@@ -118,8 +118,8 @@ function PatientDashboard() {
                 onClick={() => setActiveTab('overview')}
                 className={`w-full text-left px-4 py-3 rounded-lg flex items-center space-x-3 transition ${
                   activeTab === 'overview'
-                    ? 'bg-blue-600 text-white'
-                    : 'text-gray-700 hover:bg-gray-100'
+                    ? 'bg-sky-600 text-white'
+                    : 'text-slate-700 hover:bg-slate-100'
                 }`}
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -132,8 +132,8 @@ function PatientDashboard() {
                 onClick={() => setActiveTab('diabetes')}
                 className={`w-full text-left px-4 py-3 rounded-lg flex items-center space-x-3 transition ${
                   activeTab === 'diabetes'
-                    ? 'bg-blue-600 text-white'
-                    : 'text-gray-700 hover:bg-gray-100'
+                    ? 'bg-sky-600 text-white'
+                    : 'text-slate-700 hover:bg-slate-100'
                 }`}
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -146,8 +146,8 @@ function PatientDashboard() {
                 onClick={() => setActiveTab('appointments')}
                 className={`w-full text-left px-4 py-3 rounded-lg flex items-center space-x-3 transition ${
                   activeTab === 'appointments'
-                    ? 'bg-blue-600 text-white'
-                    : 'text-gray-700 hover:bg-gray-100'
+                    ? 'bg-sky-600 text-white'
+                    : 'text-slate-700 hover:bg-slate-100'
                 }`}
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -160,8 +160,8 @@ function PatientDashboard() {
                 onClick={() => setActiveTab('history')}
                 className={`w-full text-left px-4 py-3 rounded-lg flex items-center space-x-3 transition ${
                   activeTab === 'history'
-                    ? 'bg-blue-600 text-white'
-                    : 'text-gray-700 hover:bg-gray-100'
+                    ? 'bg-sky-600 text-white'
+                    : 'text-slate-700 hover:bg-slate-100'
                 }`}
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -172,7 +172,7 @@ function PatientDashboard() {
             </nav>
           </div>
 
-          <div className="absolute bottom-0 w-64 p-4 border-t">
+          <div className="absolute bottom-0 w-64 p-4 border-t border-slate-200">
             <button
               onClick={logout}
               className="w-full px-4 py-3 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition flex items-center justify-center space-x-2"
@@ -189,7 +189,7 @@ function PatientDashboard() {
           <div className="p-8">
             {loading ? (
               <div className="flex items-center justify-center h-64">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-sky-600"></div>
               </div>
             ) : (
               renderContent()
@@ -208,28 +208,28 @@ function Overview({ stats, appointments, onStartCall }) {
 
   return (
     <div>
-      <h2 className="text-3xl font-bold text-gray-800 mb-6">Dashboard Overview</h2>
+      <h2 className="text-3xl font-bold text-slate-800 mb-6">Dashboard Overview</h2>
       
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-gray-600 text-sm">Total Appointments</p>
-              <p className="text-3xl font-bold text-gray-800 mt-1">{stats?.totalAppointments || 0}</p>
+              <p className="text-slate-600 text-sm">Total Appointments</p>
+              <p className="text-3xl font-bold text-slate-800 mt-1">{stats?.totalAppointments || 0}</p>
             </div>
-            <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
-              <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <div className="w-12 h-12 bg-sky-100 rounded-lg flex items-center justify-center">
+              <svg className="w-6 h-6 text-sky-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
               </svg>
             </div>
           </div>
         </div>
 
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-gray-600 text-sm">Upcoming</p>
-              <p className="text-3xl font-bold text-gray-800 mt-1">{stats?.upcomingAppointments || 0}</p>
+              <p className="text-slate-600 text-sm">Upcoming</p>
+              <p className="text-3xl font-bold text-slate-800 mt-1">{stats?.upcomingAppointments || 0}</p>
             </div>
             <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
               <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -239,11 +239,11 @@ function Overview({ stats, appointments, onStartCall }) {
           </div>
         </div>
 
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-gray-600 text-sm">Health Checks</p>
-              <p className="text-3xl font-bold text-gray-800 mt-1">{stats?.totalPredictions || 0}</p>
+              <p className="text-slate-600 text-sm">Health Checks</p>
+              <p className="text-3xl font-bold text-slate-800 mt-1">{stats?.totalPredictions || 0}</p>
             </div>
             <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center">
               <svg className="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -255,31 +255,31 @@ function Overview({ stats, appointments, onStartCall }) {
       </div>
 
       {upcomingAppointments.length > 0 && (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-          <h3 className="text-xl font-bold text-gray-800 mb-4">Upcoming Appointments</h3>
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+          <h3 className="text-xl font-bold text-slate-800 mb-4">Upcoming Appointments</h3>
           <div className="space-y-4">
             {upcomingAppointments.map(apt => (
-              <div key={apt._id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+              <div key={apt._id} className="flex items-center justify-between p-4 bg-slate-50 rounded-lg border border-slate-200">
                 <div className="flex-1">
-                  <p className="font-semibold text-gray-800">{apt.doctorName}</p>
-                  <p className="text-sm text-gray-600">{new Date(apt.date).toLocaleDateString()} at {apt.time}</p>
+                  <p className="font-semibold text-slate-800">{apt.doctorName}</p>
+                  <p className="text-sm text-slate-600">{new Date(apt.date).toLocaleDateString()} at {apt.time}</p>
                 </div>
                 <div className="flex items-center space-x-2">
                   <span className={`px-3 py-1 rounded-full text-sm font-medium ${
                     apt.status === 'confirmed' ? 'bg-green-100 text-green-700' :
                     apt.status === 'pending' ? 'bg-yellow-100 text-yellow-700' :
-                    'bg-gray-100 text-gray-700'
+                    'bg-slate-100 text-slate-700'
                   }`}>
                     {apt.status}
                   </span>
                   {apt.status === 'confirmed' && (
                     <button
                       onClick={() => onStartCall(apt)}
-                      className="p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+                      className="p-2 bg-sky-600 text-white rounded-lg hover:bg-sky-700 transition"
                       title="Start video call"
                     >
                       <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                        <path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1v-5zM8 7a1 1 0 011-1h2a1 1 0 011 1v9a1 1 0 01-1 1H9a1 1 0 01-1-1V7zM14 4a1 1 0 011-1h2a1 1 0 011 1v12a1 1 0 01-1 1h-2a1 1 0 01-1-1V4z" />
+                        <path d="M2 6a2 2 0 012-2h6a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V6zM14.553 7.106A1 1 0 0014 8v4a1 1 0 00.553.894l2 1A1 1 0 0018 13V7a1 1 0 00-1.447-.894l-2 1z" />
                       </svg>
                     </button>
                   )}
@@ -296,55 +296,55 @@ function Overview({ stats, appointments, onStartCall }) {
 function AppointmentHistory({ appointments, onStartCall }) {
   return (
     <div>
-      <h2 className="text-3xl font-bold text-gray-800 mb-6">Appointment History</h2>
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200">
+      <h2 className="text-3xl font-bold text-slate-800 mb-6">Appointment History</h2>
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200">
         {appointments.length === 0 ? (
           <div className="p-12 text-center">
-            <svg className="w-16 h-16 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-16 h-16 text-slate-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
             </svg>
-            <p className="text-gray-600">No appointments yet</p>
+            <p className="text-slate-600">No appointments yet</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full">
-              <thead className="bg-gray-50">
+              <thead className="bg-slate-50">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Doctor</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Time</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Reason</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Doctor</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Date</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Time</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Status</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Reason</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Action</th>
                 </tr>
               </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
+              <tbody className="bg-white divide-y divide-slate-200">
                 {appointments.map(apt => (
                   <tr key={apt._id}>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm font-medium text-gray-900">{apt.doctorName}</div>
-                      <div className="text-sm text-gray-500">{apt.doctorId?.specialization}</div>
+                      <div className="text-sm font-medium text-slate-900">{apt.doctorName}</div>
+                      <div className="text-sm text-slate-500">{apt.doctorId?.specialization}</div>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900">
                       {new Date(apt.date).toLocaleDateString()}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{apt.time}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900">{apt.time}</td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${
                         apt.status === 'confirmed' ? 'bg-green-100 text-green-800' :
-                        apt.status === 'completed' ? 'bg-blue-100 text-blue-800' :
+                        apt.status === 'completed' ? 'bg-sky-100 text-sky-800' :
                         apt.status === 'cancelled' ? 'bg-red-100 text-red-800' :
                         'bg-yellow-100 text-yellow-800'
                       }`}>
                         {apt.status}
                       </span>
                     </td>
-                    <td className="px-6 py-4 text-sm text-gray-900">{apt.reason || 'N/A'}</td>
+                    <td className="px-6 py-4 text-sm text-slate-900">{apt.reason || 'N/A'}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm">
                       {apt.status === 'confirmed' && (
                         <button
                           onClick={() => onStartCall(apt)}
-                          className="text-blue-600 hover:text-blue-900 font-medium"
+                          className="text-sky-600 hover:text-sky-900 font-medium"
                         >
                           Call
                         </button>
