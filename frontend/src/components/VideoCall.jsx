@@ -756,7 +756,7 @@ function VideoCall({ appointmentId, otherUserId, otherUserName, isDoctor, onCall
                 {formatDuration(callDuration)}
               </p>
             </div>
-            <p className="text-gray-400 mt-4">Thank you for using TeleMed</p>
+            <p className="text-gray-400 mt-4">Thank you for using Dr.AssistAI</p>
           </div>
           <button
             onClick={() => onCallEnd && onCallEnd()}

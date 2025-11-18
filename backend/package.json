@@ -1,7 +1,7 @@
 {
-  "name": "telemedicine-backend",
+  "name": "Dr.AssistAIicine-backend",
   "version": "1.0.0",
-  "description": "Telemedicine App Backend with Diabetes Prediction",
+  "description": "Dr.AssistAIicine App Backend with Diabetes Prediction",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

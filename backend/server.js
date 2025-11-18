@@ -23,7 +23,7 @@ app.use(cors());
 app.use(express.json());
 
 // MongoDB Connection
-mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/telemedicine')
+mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/Dr.AssistAIicine')
   .then(() => {
     console.log('Connected to MongoDB');
     // Create default test users
@@ -133,9 +133,9 @@ io.on('connection', (socket) => {
   socket.on('call:initiate', (data) => {
     const { appointmentId, callerId, callerName, receiverId, offer } = data;
     const receiverSocketId = userSockets.get(receiverId);
-    
+
     console.log(`Call initiated: ${callerId} -> ${receiverId}`);
-    
+
     if (receiverSocketId) {
       activeCalls.set(appointmentId, {
         callerId,
@@ -143,7 +143,7 @@ io.on('connection', (socket) => {
         startTime: new Date(),
         status: 'ringing'
       });
-      
+
       io.to(receiverSocketId).emit('call:incoming', {
         appointmentId,
         callerId,
@@ -153,7 +153,7 @@ io.on('connection', (socket) => {
       console.log(`Call:incoming sent to receiver socket: ${receiverSocketId}`);
     } else {
       console.log(`Receiver not found for call: ${receiverId}`);
-      io.to(socket.id).emit('call:rejected', { 
+      io.to(socket.id).emit('call:rejected', {
         appointmentId,
         reason: 'Receiver offline'
       });
@@ -163,13 +163,13 @@ io.on('connection', (socket) => {
   socket.on('call:answer', (data) => {
     const { appointmentId, answer } = data;
     const callData = activeCalls.get(appointmentId);
-    
+
     console.log(`Call answer received for appointment: ${appointmentId}`);
-    
+
     if (callData) {
       callData.status = 'active';
       const callerSocketId = userSockets.get(callData.callerId);
-      
+
       if (callerSocketId) {
         io.to(callerSocketId).emit('call:answered', {
           appointmentId,
@@ -183,11 +183,11 @@ io.on('connection', (socket) => {
   socket.on('call:ice-candidate', (data) => {
     const { appointmentId, candidate, senderId } = data;
     const callData = activeCalls.get(appointmentId);
-    
+
     if (callData) {
       const receiverId = senderId === callData.callerId ? callData.receiverId : callData.callerId;
       const receiverSocketId = userSockets.get(receiverId);
-      
+
       if (receiverSocketId) {
         io.to(receiverSocketId).emit('call:ice-candidate', {
           appointmentId,
@@ -200,11 +200,11 @@ io.on('connection', (socket) => {
   socket.on('call:reject', (data) => {
     const { appointmentId } = data;
     const callData = activeCalls.get(appointmentId);
-    
+
     if (callData) {
       const otherUserId = data.userId === callData.callerId ? callData.receiverId : callData.callerId;
       const otherSocketId = userSockets.get(otherUserId);
-      
+
       if (otherSocketId) {
         io.to(otherSocketId).emit('call:rejected', { appointmentId });
       }
@@ -215,11 +215,11 @@ io.on('connection', (socket) => {
   socket.on('call:end', (data) => {
     const { appointmentId } = data;
     const callData = activeCalls.get(appointmentId);
-    
+
     if (callData) {
       const otherUserId = data.userId === callData.callerId ? callData.receiverId : callData.callerId;
       const otherSocketId = userSockets.get(otherUserId);
-      
+
       if (otherSocketId) {
         io.to(otherSocketId).emit('call:ended', { appointmentId });
       }
@@ -263,7 +263,7 @@ const broadcastAppointmentUpdate = async (appointment, eventType) => {
 // Auth Middleware
 const authMiddleware = (req, res, next) => {
   const token = req.header('Authorization')?.replace('Bearer ', '');
-  
+
   if (!token) {
     return res.status(401).json({ error: 'No token provided' });
   }
@@ -291,7 +291,7 @@ app.post('/api/auth/register', async (req, res) => {
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
-    
+
     const user = new User({
       name,
       email,
@@ -384,7 +384,7 @@ app.get('/api/doctors', authMiddleware, async (req, res) => {
 app.post('/api/appointments', authMiddleware, async (req, res) => {
   try {
     const { doctorId, date, time, reason } = req.body;
-    
+
     const patient = await User.findById(req.userId);
     const doctor = await User.findById(doctorId);
 
@@ -415,15 +415,15 @@ app.post('/api/appointments', authMiddleware, async (req, res) => {
 // Get appointments
 app.get('/api/appointments', authMiddleware, async (req, res) => {
   try {
-    const query = req.userRole === 'patient' 
+    const query = req.userRole === 'patient'
       ? { patientId: req.userId }
       : { doctorId: req.userId };
-    
+
     const appointments = await Appointment.find(query)
       .populate('patientId', 'name email phone')
       .populate('doctorId', 'name email specialization')
       .sort({ date: -1 });
-    
+
     res.json(appointments);
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch appointments' });
@@ -452,10 +452,10 @@ app.patch('/api/appointments/:id', authMiddleware, async (req, res) => {
 app.post('/api/predict-diabetes', authMiddleware, async (req, res) => {
   try {
     const inputData = req.body;
-    
+
     const pythonCmd = process.env.PYTHON_CMD || 'python';
     const python = spawn(pythonCmd, ['ml_model/predict.py', JSON.stringify(inputData)]);
-    
+
     let result = '';
     let error = '';
 
@@ -474,7 +474,7 @@ app.post('/api/predict-diabetes', authMiddleware, async (req, res) => {
 
       try {
         const prediction = JSON.parse(result);
-        
+
         const diabetesPrediction = new DiabetesPrediction({
           userId: req.userId,
           ...inputData,
