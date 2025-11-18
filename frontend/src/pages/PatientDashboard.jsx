@@ -1,5 +1,5 @@
-// frontend/src/pages/PatientDashboard.jsx (Enhanced)
-import React, { useState, useEffect } from 'react';
+// frontend/src/pages/PatientDashboard.jsx (Enhanced with Real-time Updates)
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import websocketService from '../services/websocket';
 import VideoCall from '../components/VideoCall';
@@ -8,38 +8,18 @@ import DiabetesPrediction from '../components/DiabetesPrediction';
 import AppointmentBooking from '../components/AppointmentBooking';
 
 function PatientDashboard() {
-  const { user, logout, API_URL } = useAuth();
+  const { user, logout, API_URL, wsConnected } = useAuth();
   const [activeTab, setActiveTab] = useState('overview');
   const [stats, setStats] = useState(null);
   const [appointments, setAppointments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeCall, setActiveCall] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
-    fetchDashboardData();
-    
-    const handleAppointmentUpdate = (data) => {
-      console.log('Appointment update received:', data);
-      fetchDashboardData();
-    };
-
+  const fetchDashboardData = useCallback(async (showRefreshing = false) => {
     try {
-      websocketService.on('appointment:updated', handleAppointmentUpdate);
-    } catch (error) {
-      console.warn('WebSocket listener setup warning:', error);
-    }
-
-    return () => {
-      try {
-        websocketService.off('appointment:updated', handleAppointmentUpdate);
-      } catch (error) {
-        console.warn('WebSocket listener cleanup warning:', error);
-      }
-    };
-  }, []);
-
-  const fetchDashboardData = async () => {
-    try {
+      if (showRefreshing) setRefreshing(true);
+      
       const [statsRes, appointmentsRes] = await Promise.all([
         axios.get(`${API_URL}/stats`),
         axios.get(`${API_URL}/appointments`)
@@ -51,8 +31,33 @@ function PatientDashboard() {
       console.error('Failed to fetch dashboard data:', error);
     } finally {
       setLoading(false);
+      if (showRefreshing) {
+        setTimeout(() => setRefreshing(false), 500);
+      }
     }
-  };
+  }, [API_URL]);
+
+  useEffect(() => {
+    fetchDashboardData();
+
+    // Set up real-time listeners
+    const handleAppointmentUpdate = (data) => {
+      console.log('📱 Appointment update received:', data.type);
+      fetchDashboardData(true);
+    };
+
+    websocketService.onAppointmentUpdated(handleAppointmentUpdate);
+
+    // Periodic refresh every 30 seconds
+    const interval = setInterval(() => {
+      fetchDashboardData();
+    }, 30000);
+
+    return () => {
+      websocketService.off('appointment:updated', handleAppointmentUpdate);
+      clearInterval(interval);
+    };
+  }, [fetchDashboardData]);
 
   const startVideoCall = (appointment) => {
     setActiveCall({
@@ -66,19 +71,19 @@ function PatientDashboard() {
   const renderContent = () => {
     switch (activeTab) {
       case 'overview':
-        return <Overview stats={stats} appointments={appointments} onStartCall={startVideoCall} />;
+        return <Overview stats={stats} appointments={appointments} onStartCall={startVideoCall} onRefresh={() => fetchDashboardData(true)} />;
       case 'diabetes':
         return <DiabetesPrediction />;
       case 'appointments':
-        return <AppointmentBooking onBookingComplete={fetchDashboardData} />;
+        return <AppointmentBooking onBookingComplete={() => fetchDashboardData(true)} />;
       case 'history':
-        return <AppointmentHistory appointments={appointments} onStartCall={startVideoCall} />;
+        return <AppointmentHistory appointments={appointments} onStartCall={startVideoCall} onRefresh={() => fetchDashboardData(true)} />;
       case 'health':
         return <HealthRecords />;
       case 'prescriptions':
         return <Prescriptions />;
       default:
-        return <Overview stats={stats} appointments={appointments} onStartCall={startVideoCall} />;
+        return <Overview stats={stats} appointments={appointments} onStartCall={startVideoCall} onRefresh={() => fetchDashboardData(true)} />;
     }
   };
 
@@ -92,22 +97,34 @@ function PatientDashboard() {
           isDoctor={activeCall.isDoctor}
           onCallEnd={() => {
             setActiveCall(null);
-            fetchDashboardData();
+            fetchDashboardData(true);
           }}
         />
       )}
       
       <div className="flex h-screen bg-gradient-to-br from-slate-50 to-gray-100">
-        <div className="w-64 bg-white shadow-lg overflow-y-auto flex flex-col">
-          <div className="p-6 border-b border-gray-200 sticky top-0 bg-white">
-            <h1 className="text-2xl font-bold text-cyan-600">Dr.AssistAI</h1>
+        {/* Sidebar */}
+        <div className="w-64 bg-white shadow-xl overflow-y-auto flex flex-col border-r border-gray-200">
+          <div className="p-6 border-b border-gray-200 sticky top-0 bg-white z-10">
+            <h1 className="text-2xl font-bold bg-gradient-to-r from-cyan-600 to-blue-600 bg-clip-text text-transparent">
+              Dr.AssistAI
+            </h1>
             <p className="text-sm text-gray-600 mt-1">Patient Portal</p>
+            
+            {/* Connection Status */}
+            <div className="mt-3 flex items-center text-xs">
+              <div className={`w-2 h-2 rounded-full mr-2 ${wsConnected ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`}></div>
+              <span className={wsConnected ? 'text-green-600' : 'text-gray-500'}>
+                {wsConnected ? 'Connected' : 'Offline'}
+              </span>
+            </div>
           </div>
 
           <div className="p-4 flex-1">
+            {/* User Profile */}
             <div className="mb-6">
-              <div className="flex items-center space-x-3 p-3 bg-cyan-50 rounded-lg border border-cyan-100">
-                <div className="w-10 h-10 bg-cyan-600 rounded-full flex items-center justify-center text-white font-semibold flex-shrink-0">
+              <div className="flex items-center space-x-3 p-4 bg-gradient-to-r from-cyan-50 to-blue-50 rounded-xl border border-cyan-100 shadow-sm">
+                <div className="w-12 h-12 bg-gradient-to-br from-cyan-600 to-blue-600 rounded-full flex items-center justify-center text-white font-bold text-lg flex-shrink-0 shadow-md">
                   {user?.name?.charAt(0)}
                 </div>
                 <div className="min-w-0">
@@ -117,7 +134,8 @@ function PatientDashboard() {
               </div>
             </div>
 
-            <nav className="space-y-2">
+            {/* Navigation */}
+            <nav className="space-y-1">
               <NavButton 
                 icon={<HomeIcon />}
                 label="Overview"
@@ -126,9 +144,10 @@ function PatientDashboard() {
               />
               <NavButton 
                 icon={<BrainIcon />}
-                label="Diabetes Prediction"
+                label="Health Check"
                 active={activeTab === 'diabetes'}
                 onClick={() => setActiveTab('diabetes')}
+                badge="AI"
               />
               <NavButton 
                 icon={<CalendarIcon />}
@@ -138,9 +157,10 @@ function PatientDashboard() {
               />
               <NavButton 
                 icon={<HistoryIcon />}
-                label="Appointment History"
+                label="My Appointments"
                 active={activeTab === 'history'}
                 onClick={() => setActiveTab('history')}
+                count={appointments.length}
               />
               <NavButton 
                 icon={<HeartIcon />}
@@ -157,10 +177,11 @@ function PatientDashboard() {
             </nav>
           </div>
 
+          {/* Logout Button */}
           <div className="p-4 border-t border-gray-200 bg-white">
             <button
               onClick={logout}
-              className="w-full px-4 py-3 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition flex items-center justify-center space-x-2 font-medium"
+              className="w-full px-4 py-3 bg-red-50 text-red-600 rounded-xl hover:bg-red-100 transition-all duration-200 flex items-center justify-center space-x-2 font-medium shadow-sm hover:shadow"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
@@ -170,14 +191,26 @@ function PatientDashboard() {
           </div>
         </div>
 
+        {/* Main Content */}
         <div className="flex-1 overflow-auto">
           <div className="p-8">
             {loading ? (
-              <div className="flex items-center justify-center h-64">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-sky-600"></div>
+              <div className="flex flex-col items-center justify-center h-64">
+                <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-cyan-600 mb-4"></div>
+                <p className="text-gray-600 font-medium">Loading your dashboard...</p>
               </div>
             ) : (
-              renderContent()
+              <>
+                {refreshing && (
+                  <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg flex items-center text-blue-700 animate-fade-in">
+                    <svg className="animate-spin w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    <span className="text-sm font-medium">Updating...</span>
+                  </div>
+                )}
+                {renderContent()}
+              </>
             )}
           </div>
         </div>
@@ -186,80 +219,136 @@ function PatientDashboard() {
   );
 }
 
-function NavButton({ icon, label, active, onClick }) {
+function NavButton({ icon, label, active, onClick, badge, count }) {
   return (
     <button
       onClick={onClick}
-      className={`w-full text-left px-4 py-3 rounded-lg flex items-center space-x-3 transition ${
+      className={`w-full text-left px-4 py-3 rounded-xl flex items-center justify-between transition-all duration-200 text-sm font-medium ${
         active
-          ? 'bg-cyan-600 text-white'
+          ? 'bg-gradient-to-r from-cyan-600 to-blue-600 text-white shadow-md'
           : 'text-gray-700 hover:bg-gray-100'
       }`}
     >
-      <div className="flex-shrink-0">{icon}</div>
-      <span>{label}</span>
+      <div className="flex items-center space-x-3">
+        <div className="flex-shrink-0">{icon}</div>
+        <span>{label}</span>
+      </div>
+      {badge && (
+        <span className={`px-2 py-0.5 text-xs font-bold rounded-full ${
+          active ? 'bg-white text-cyan-600' : 'bg-cyan-100 text-cyan-700'
+        }`}>
+          {badge}
+        </span>
+      )}
+      {count !== undefined && count > 0 && (
+        <span className={`px-2 py-0.5 text-xs font-bold rounded-full ${
+          active ? 'bg-white text-cyan-600' : 'bg-gray-200 text-gray-700'
+        }`}>
+          {count}
+        </span>
+      )}
     </button>
   );
 }
 
-function Overview({ stats, appointments, onStartCall }) {
+function Overview({ stats, appointments, onStartCall, onRefresh }) {
   const upcomingAppointments = appointments
     .filter(apt => new Date(apt.date) >= new Date() && apt.status !== 'cancelled')
     .slice(0, 3);
 
   return (
     <div>
-      <h2 className="text-3xl font-bold text-gray-800 mb-6">Dashboard Overview</h2>
+      <div className="flex justify-between items-center mb-6">
+        <h2 className="text-3xl font-bold text-gray-800">Dashboard Overview</h2>
+        <button
+          onClick={onRefresh}
+          className="px-4 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition flex items-center space-x-2 text-sm font-medium text-gray-700 shadow-sm"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+          <span>Refresh</span>
+        </button>
+      </div>
       
+      {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
         <StatCard 
           title="Total Appointments"
           value={stats?.totalAppointments || 0}
           icon={<CalendarIcon className="w-6 h-6 text-cyan-600" />}
-          bgColor="bg-cyan-100"
+          bgColor="bg-gradient-to-br from-cyan-100 to-blue-100"
+          trend="+12%"
         />
         <StatCard 
           title="Upcoming"
           value={stats?.upcomingAppointments || 0}
           icon={<ClockIcon className="w-6 h-6 text-green-600" />}
-          bgColor="bg-green-100"
+          bgColor="bg-gradient-to-br from-green-100 to-emerald-100"
         />
         <StatCard 
           title="Health Checks"
           value={stats?.totalPredictions || 0}
           icon={<HeartIcon className="w-6 h-6 text-purple-600" />}
-          bgColor="bg-purple-100"
+          bgColor="bg-gradient-to-br from-purple-100 to-pink-100"
         />
       </div>
 
-      {upcomingAppointments.length > 0 && (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-8">
-          <h3 className="text-xl font-bold text-gray-800 mb-4">Upcoming Appointments</h3>
-          <div className="space-y-4">
-            {upcomingAppointments.map(apt => (
-              <AppointmentCard key={apt._id} apt={apt} onStartCall={onStartCall} />
-            ))}
-          </div>
-        </div>
-      )}
-
+      {/* Content Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Upcoming Appointments */}
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow">
+          <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center">
+            <svg className="w-5 h-5 mr-2 text-cyan-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
+            Upcoming Appointments
+          </h3>
+          {upcomingAppointments.length === 0 ? (
+            <div className="text-center py-8">
+              <svg className="w-16 h-16 text-gray-300 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+              <p className="text-gray-500">No upcoming appointments</p>
+              <p className="text-sm text-gray-400 mt-1">Book one to get started</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {upcomingAppointments.map(apt => (
+                <AppointmentCard key={apt._id} apt={apt} onStartCall={onStartCall} />
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Health Tips */}
         <HealthTipsCard />
+      </div>
+
+      {/* Medicine Reminder */}
+      <div className="mt-6">
         <MedicineReminder />
       </div>
     </div>
   );
 }
 
-function StatCard({ title, value, icon, bgColor }) {
+function StatCard({ title, value, icon, bgColor, trend }) {
   return (
-    <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
+    <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 hover:shadow-md transition-all duration-200">
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-gray-600 text-sm">{title}</p>
-          <p className="text-3xl font-bold text-gray-800 mt-1">{value}</p>
+          <p className="text-gray-600 text-sm font-medium">{title}</p>
+          <div className="flex items-end mt-2">
+            <p className="text-4xl font-bold text-gray-800">{value}</p>
+            {trend && (
+              <span className="ml-2 text-green-600 text-sm font-semibold mb-1">
+                {trend}
+              </span>
+            )}
+          </div>
         </div>
-        <div className={`w-12 h-12 ${bgColor} rounded-lg flex items-center justify-center`}>
+        <div className={`w-14 h-14 ${bgColor} rounded-2xl flex items-center justify-center shadow-sm`}>
           {icon}
         </div>
       </div>
@@ -268,27 +357,40 @@ function StatCard({ title, value, icon, bgColor }) {
 }
 
 function AppointmentCard({ apt, onStartCall }) {
+  const getStatusColor = (status) => {
+    switch (status) {
+      case 'confirmed': return 'bg-green-100 text-green-700 border-green-200';
+      case 'pending': return 'bg-yellow-100 text-yellow-700 border-yellow-200';
+      case 'completed': return 'bg-blue-100 text-blue-700 border-blue-200';
+      case 'cancelled': return 'bg-red-100 text-red-700 border-red-200';
+      default: return 'bg-gray-100 text-gray-700 border-gray-200';
+    }
+  };
+
   return (
-    <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-200 hover:shadow-md transition">
+    <div className="flex items-center justify-between p-4 bg-gradient-to-r from-gray-50 to-white rounded-xl border border-gray-200 hover:shadow-md transition-all duration-200">
       <div className="flex-1">
-        <p className="font-semibold text-gray-800">{apt.doctorName}</p>
-        <p className="text-sm text-gray-600">{new Date(apt.date).toLocaleDateString()} at {apt.time}</p>
+        <p className="font-semibold text-gray-800 mb-1">{apt.doctorName}</p>
+        <p className="text-sm text-gray-600 flex items-center">
+          <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+          </svg>
+          {new Date(apt.date).toLocaleDateString()} 
+          <span className="mx-2">•</span>
+          {apt.time}
+        </p>
       </div>
       <div className="flex items-center space-x-2">
-        <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-          apt.status === 'confirmed' ? 'bg-green-100 text-green-700' :
-          apt.status === 'pending' ? 'bg-yellow-100 text-yellow-700' :
-          'bg-gray-100 text-gray-700'
-        }`}>
+        <span className={`px-3 py-1 rounded-full text-xs font-semibold border ${getStatusColor(apt.status)}`}>
           {apt.status}
         </span>
         {apt.status === 'confirmed' && (
           <button
             onClick={() => onStartCall(apt)}
-            className="p-2 bg-cyan-600 text-white rounded-lg hover:bg-cyan-700 transition"
+            className="p-2.5 bg-gradient-to-r from-cyan-600 to-blue-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 group"
             title="Start video call"
           >
-            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+            <svg className="w-5 h-5 group-hover:scale-110 transition-transform" fill="currentColor" viewBox="0 0 20 20">
               <path d="M2 6a2 2 0 012-2h6a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V6zM14.553 7.106A1 1 0 0014 8v4a1 1 0 00.553.894l2 1A1 1 0 0018 13V7a1 1 0 00-1.447-.894l-2 1z" />
             </svg>
           </button>
@@ -300,27 +402,32 @@ function AppointmentCard({ apt, onStartCall }) {
 
 function HealthTipsCard() {
   const tips = [
-    "Drink at least 8 glasses of water daily",
-    "Exercise for 30 minutes every day",
-    "Get 7-9 hours of sleep",
-    "Eat a balanced diet with fruits and vegetables"
+    { icon: "💧", text: "Drink at least 8 glasses of water daily", color: "blue" },
+    { icon: "🏃", text: "Exercise for 30 minutes every day", color: "green" },
+    { icon: "😴", text: "Get 7-9 hours of quality sleep", color: "purple" },
+    { icon: "🥗", text: "Eat a balanced diet with fruits and vegetables", color: "orange" }
   ];
 
+  const colorClasses = {
+    blue: "from-blue-50 to-cyan-50 border-blue-100",
+    green: "from-green-50 to-emerald-50 border-green-100",
+    purple: "from-purple-50 to-pink-50 border-purple-100",
+    orange: "from-orange-50 to-amber-50 border-orange-100"
+  };
+
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+    <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow">
       <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center">
         <svg className="w-5 h-5 mr-2 text-green-600" fill="currentColor" viewBox="0 0 20 20">
           <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.381-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
         </svg>
-        Health Tips
+        Daily Health Tips
       </h3>
       <div className="space-y-3">
         {tips.map((tip, idx) => (
-          <div key={idx} className="flex items-start space-x-3 p-3 bg-green-50 rounded-lg border border-green-100">
-            <svg className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-            </svg>
-            <p className="text-sm text-gray-700">{tip}</p>
+          <div key={idx} className={`flex items-start space-x-3 p-4 bg-gradient-to-r ${colorClasses[tip.color]} rounded-xl border transition-all hover:shadow-sm`}>
+            <span className="text-2xl flex-shrink-0">{tip.icon}</span>
+            <p className="text-sm text-gray-700 font-medium">{tip.text}</p>
           </div>
         ))}
       </div>
@@ -330,31 +437,30 @@ function HealthTipsCard() {
 
 function MedicineReminder() {
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-      <h3 className="text-xl font-bold text-slate-800 mb-4 flex items-center">
+    <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow">
+      <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center">
         <svg className="w-5 h-5 mr-2 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
-          <path d="M8 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zM15 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z" />
-          <path d="M3 4a1 1 0 00-1 1v10a1 1 0 001 1h1.05a2.5 2.5 0 014.9 0H10a1 1 0 001-1V5a1 1 0 00-1-1H3zM14 7a1 1 0 00-1 1v6.05A2.5 2.5 0 0115.95 16H17a1 1 0 001-1v-5a1 1 0 00-.293-.707l-2-2A1 1 0 0015 7h-1z" />
+          <path d="M10 2a6 6 0 00-6 6v3.586l-.707.707A1 1 0 004 14h12a1 1 0 00.707-1.707L16 11.586V8a6 6 0 00-6-6zM10 18a3 3 0 01-3-3h6a3 3 0 01-3 3z" />
         </svg>
-        Medicine Reminder
+        Medicine Reminders
       </h3>
-      <div className="space-y-3">
-        <div className="p-4 bg-blue-50 rounded-lg border border-blue-100">
-          <div className="flex justify-between items-start">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="p-4 bg-gradient-to-r from-green-50 to-emerald-50 rounded-xl border border-green-100">
+          <div className="flex justify-between items-start mb-2">
             <div>
-              <p className="font-semibold text-slate-800">Aspirin 100mg</p>
-              <p className="text-sm text-slate-600 mt-1">Morning - 08:00 AM</p>
+              <p className="font-semibold text-gray-800">Aspirin 100mg</p>
+              <p className="text-sm text-gray-600 mt-1">Morning - 08:00 AM</p>
             </div>
-            <span className="text-green-600 text-sm font-semibold">✓ Taken</span>
+            <span className="text-green-600 text-xs font-bold bg-green-100 px-2 py-1 rounded-full">✓ Taken</span>
           </div>
         </div>
-        <div className="p-4 bg-yellow-50 rounded-lg border border-yellow-100">
-          <div className="flex justify-between items-start">
+        <div className="p-4 bg-gradient-to-r from-yellow-50 to-amber-50 rounded-xl border border-yellow-100">
+          <div className="flex justify-between items-start mb-2">
             <div>
-              <p className="font-semibold text-slate-800">Vitamin D 1000IU</p>
-              <p className="text-sm text-slate-600 mt-1">Afternoon - 02:00 PM</p>
+              <p className="font-semibold text-gray-800">Vitamin D 1000IU</p>
+              <p className="text-sm text-gray-600 mt-1">Afternoon - 02:00 PM</p>
             </div>
-            <span className="text-yellow-600 text-sm font-semibold">⏰ Pending</span>
+            <span className="text-yellow-600 text-xs font-bold bg-yellow-100 px-2 py-1 rounded-full">⏰ Pending</span>
           </div>
         </div>
       </div>
@@ -362,57 +468,75 @@ function MedicineReminder() {
   );
 }
 
-function AppointmentHistory({ appointments, onStartCall }) {
+function AppointmentHistory({ appointments, onStartCall, onRefresh }) {
   return (
     <div>
-      <h2 className="text-3xl font-bold text-slate-800 mb-6">Appointment History</h2>
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+      <div className="flex justify-between items-center mb-6">
+        <h2 className="text-3xl font-bold text-gray-800">Appointment History</h2>
+        <button
+          onClick={onRefresh}
+          className="px-4 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition flex items-center space-x-2 text-sm font-medium text-gray-700"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+          <span>Refresh</span>
+        </button>
+      </div>
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
         {appointments.length === 0 ? (
           <div className="p-12 text-center">
-            <svg className="w-16 h-16 text-slate-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-20 h-20 text-gray-300 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
             </svg>
-            <p className="text-slate-600">No appointments yet</p>
+            <p className="text-gray-600 text-lg mb-2">No appointments yet</p>
+            <p className="text-gray-400 text-sm">Book your first appointment to get started</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full">
-              <thead className="bg-slate-50">
+              <thead className="bg-gradient-to-r from-gray-50 to-gray-100">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Doctor</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Date</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Time</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Status</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Action</th>
+                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">Doctor</th>
+                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">Date & Time</th>
+                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">Reason</th>
+                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">Status</th>
+                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">Action</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-200">
+              <tbody className="divide-y divide-gray-200">
                 {appointments.map(apt => (
-                  <tr key={apt._id} className="hover:bg-slate-50">
+                  <tr key={apt._id} className="hover:bg-gray-50 transition-colors">
                     <td className="px-6 py-4">
-                      <div className="text-sm font-medium text-slate-900">{apt.doctorName}</div>
+                      <div className="flex items-center">
+                        <div className="w-10 h-10 bg-gradient-to-br from-cyan-500 to-blue-600 rounded-full flex items-center justify-center text-white font-bold mr-3">
+                          {apt.doctorName?.charAt(0)}
+                        </div>
+                        <div className="text-sm font-medium text-gray-900">{apt.doctorName}</div>
+                      </div>
                     </td>
-                    <td className="px-6 py-4 text-sm text-slate-900">
-                      {new Date(apt.date).toLocaleDateString()}
-                    </td>
-                    <td className="px-6 py-4 text-sm text-slate-900">{apt.time}</td>
                     <td className="px-6 py-4">
-                      <span className={`px-2 py-1 text-xs font-semibold rounded-full ${
+                      <div className="text-sm text-gray-900">{new Date(apt.date).toLocaleDateString()}</div>
+                      <div className="text-sm text-gray-500">{apt.time}</div>
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-900">{apt.reason || 'Regular checkup'}</td>
+                    <td className="px-6 py-4">
+                      <span className={`px-3 py-1 text-xs font-semibold rounded-full ${
                         apt.status === 'confirmed' ? 'bg-green-100 text-green-800' :
-                        apt.status === 'completed' ? 'bg-sky-100 text-sky-800' :
+                        apt.status === 'completed' ? 'bg-blue-100 text-blue-800' :
                         apt.status === 'cancelled' ? 'bg-red-100 text-red-800' :
                         'bg-yellow-100 text-yellow-800'
                       }`}>
                         {apt.status}
                       </span>
                     </td>
-                    <td className="px-6 py-4 text-sm">
+                    <td className="px-6 py-4">
                       {apt.status === 'confirmed' && (
                         <button
                           onClick={() => onStartCall(apt)}
-                          className="text-sky-600 hover:text-sky-900 font-medium"
+                          className="text-cyan-600 hover:text-cyan-900 font-semibold text-sm hover:underline"
                         >
-                          Call
+                          Join Call
                         </button>
                       )}
                     </td>
@@ -428,49 +552,57 @@ function AppointmentHistory({ appointments, onStartCall }) {
 }
 
 function HealthRecords() {
+  const records = [
+    { title: "Blood Pressure", value: "120/80", unit: "mmHg", status: "Normal", color: "green" },
+    { title: "Heart Rate", value: "72", unit: "bpm", status: "Normal", color: "green" },
+    { title: "BMI", value: "24.5", unit: "kg/m²", status: "Healthy", color: "green" },
+    { title: "Blood Sugar", value: "95", unit: "mg/dL", status: "Normal", color: "green" }
+  ];
+
   return (
     <div>
-      <h2 className="text-3xl font-bold text-slate-800 mb-6">Health Records</h2>
+      <h2 className="text-3xl font-bold text-gray-800 mb-6">Health Records</h2>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-          <h3 className="text-lg font-semibold text-slate-800 mb-4">Blood Pressure</h3>
-          <div className="text-center py-8">
-            <p className="text-3xl font-bold text-slate-800">120/80</p>
-            <p className="text-sm text-slate-600 mt-2">mmHg</p>
-            <p className="text-sm text-green-600 font-medium mt-2">Normal Range</p>
+        {records.map((record, idx) => (
+          <div key={idx} className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-all">
+            <h3 className="text-lg font-semibold text-gray-800 mb-4">{record.title}</h3>
+            <div className="text-center py-6">
+              <p className="text-5xl font-bold text-gray-800 mb-2">{record.value}</p>
+              <p className="text-sm text-gray-600 mb-3">{record.unit}</p>
+              <span className={`px-4 py-1.5 text-sm font-semibold rounded-full ${
+                record.color === 'green' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+              }`}>
+                {record.status}
+              </span>
+            </div>
           </div>
-        </div>
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-          <h3 className="text-lg font-semibold text-slate-800 mb-4">BMI</h3>
-          <div className="text-center py-8">
-            <p className="text-3xl font-bold text-slate-800">24.5</p>
-            <p className="text-sm text-slate-600 mt-2">kg/m²</p>
-            <p className="text-sm text-green-600 font-medium mt-2">Healthy Weight</p>
-          </div>
-        </div>
+        ))}
       </div>
     </div>
   );
 }
 
 function Prescriptions() {
+  const prescriptions = [
+    { name: "Aspirin 100mg", dosage: "1 tablet daily", doctor: "Dr. Smith", date: "2024-01-15" },
+    { name: "Vitamin D 1000IU", dosage: "1 capsule daily", doctor: "Dr. Johnson", date: "2024-01-10" }
+  ];
+
   return (
     <div>
-      <h2 className="text-3xl font-bold text-slate-800 mb-6">Prescriptions</h2>
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+      <h2 className="text-3xl font-bold text-gray-800 mb-6">Prescriptions</h2>
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
         <div className="space-y-4">
-          {[
-            { name: "Aspirin 100mg", dosage: "1 tablet daily", doctor: "Dr. Smith" },
-            { name: "Vitamin D 1000IU", dosage: "1 capsule daily", doctor: "Dr. Johnson" }
-          ].map((rx, idx) => (
-            <div key={idx} className="p-4 bg-slate-50 rounded-lg border border-slate-200">
+          {prescriptions.map((rx, idx) => (
+            <div key={idx} className="p-5 bg-gradient-to-r from-blue-50 to-cyan-50 rounded-xl border border-blue-100 hover:shadow-md transition-all">
               <div className="flex justify-between items-start">
-                <div>
-                  <p className="font-semibold text-slate-800">{rx.name}</p>
-                  <p className="text-sm text-slate-600 mt-1">Dosage: {rx.dosage}</p>
-                  <p className="text-sm text-slate-600">Prescribed by: {rx.doctor}</p>
+                <div className="flex-1">
+                  <p className="font-bold text-gray-800 text-lg mb-1">{rx.name}</p>
+                  <p className="text-sm text-gray-600 mb-1">Dosage: {rx.dosage}</p>
+                  <p className="text-sm text-gray-600">Prescribed by: {rx.doctor}</p>
+                  <p className="text-xs text-gray-500 mt-1">{new Date(rx.date).toLocaleDateString()}</p>
                 </div>
-                <button className="px-4 py-2 bg-sky-600 text-white rounded-lg hover:bg-sky-700 transition text-sm font-medium">
+                <button className="px-4 py-2 bg-gradient-to-r from-cyan-600 to-blue-600 text-white rounded-xl hover:shadow-lg transition-all text-sm font-semibold">
                   Download
                 </button>
               </div>
@@ -482,7 +614,7 @@ function Prescriptions() {
   );
 }
 
-// Icons
+// Icons (optimized SVG components)
 function HomeIcon() { return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>; }
 function BrainIcon() { return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>; }
 function CalendarIcon() { return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>; }

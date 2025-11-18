@@ -1,42 +1,76 @@
-// frontend/src/services/websocket.js (Enhanced with Video Call Support)
+// frontend/src/services/websocket.js (Enhanced with Better Error Handling)
 import io from 'socket.io-client';
 
 class WebSocketService {
   constructor() {
     this.socket = null;
+    this.reconnectAttempts = 0;
+    this.maxReconnectAttempts = 5;
   }
 
   connect(url = 'http://localhost:5000') {
-    this.socket = io(url, {
-      reconnection: true,
-      reconnectionDelay: 1000,
-      reconnectionDelayMax: 5000,
-      reconnectionAttempts: 5,
-      transports: ['websocket', 'polling']
-    });
+    if (this.socket?.connected) {
+      console.log('WebSocket already connected');
+      return;
+    }
 
-    this.socket.on('connect', () => {
-      console.log('WebSocket connected');
-    });
+    try {
+      this.socket = io(url, {
+        reconnection: true,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 5000,
+        reconnectionAttempts: this.maxReconnectAttempts,
+        transports: ['websocket', 'polling'],
+        timeout: 10000
+      });
 
-    this.socket.on('disconnect', () => {
-      console.log('WebSocket disconnected');
-    });
+      this.socket.on('connect', () => {
+        console.log('✓ WebSocket connected');
+        this.reconnectAttempts = 0;
+      });
 
-    this.socket.on('connect_error', (error) => {
-      console.error('WebSocket connection error:', error);
-    });
+      this.socket.on('disconnect', (reason) => {
+        console.log('✗ WebSocket disconnected:', reason);
+      });
+
+      this.socket.on('connect_error', (error) => {
+        this.reconnectAttempts++;
+        console.error(`✗ WebSocket connection error (attempt ${this.reconnectAttempts}):`, error.message);
+        
+        if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+          console.error('Max reconnection attempts reached');
+        }
+      });
+
+      this.socket.on('reconnect', (attemptNumber) => {
+        console.log(`✓ WebSocket reconnected after ${attemptNumber} attempts`);
+      });
+
+      this.socket.on('reconnect_error', (error) => {
+        console.error('Reconnection error:', error);
+      });
+
+      this.socket.on('reconnect_failed', () => {
+        console.error('Failed to reconnect to WebSocket server');
+      });
+    } catch (error) {
+      console.error('Error initializing WebSocket:', error);
+    }
   }
 
   disconnect() {
     if (this.socket) {
       this.socket.disconnect();
+      this.socket = null;
+      console.log('✓ WebSocket disconnected');
     }
   }
 
   emit(event, data) {
-    if (this.socket) {
+    if (this.socket && this.socket.connected) {
       this.socket.emit(event, data);
+    } else {
+      console.warn(`Cannot emit ${event}: WebSocket not connected`);
     }
   }
 
@@ -48,8 +82,16 @@ class WebSocketService {
 
   off(event, callback) {
     if (this.socket) {
-      this.socket.off(event, callback);
+      if (callback) {
+        this.socket.off(event, callback);
+      } else {
+        this.socket.off(event);
+      }
     }
+  }
+
+  isConnected() {
+    return this.socket?.connected || false;
   }
 
   // Appointment events
@@ -112,6 +154,11 @@ class WebSocketService {
 
   onCallEnded(callback) {
     this.on('call:ended', callback);
+  }
+
+  // User status events
+  onUserStatus(callback) {
+    this.on('user:status', callback);
   }
 
   // Stats update events

@@ -1,20 +1,18 @@
-// frontend/src/contexts/AuthContext.jsx (Fixed)
+// frontend/src/contexts/AuthContext.jsx (Fixed and Enhanced)
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import axios from 'axios';
 import websocketService from '../services/websocket';
 
 const AuthContext = createContext();
 
-const API_URL = 'http://localhost:5000/api';
-
-// Configure axios defaults
-axios.defaults.baseURL = API_URL;
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
 export const AuthProvider = ({ children }) => {
     const [user, setUser] = useState(null);
     const [loading, setLoading] = useState(true);
     const [token, setToken] = useState(localStorage.getItem('token'));
     const [error, setError] = useState(null);
+    const [wsConnected, setWsConnected] = useState(false);
 
     // Set up axios interceptor for auth token
     useEffect(() => {
@@ -24,6 +22,10 @@ export const AuthProvider = ({ children }) => {
                 if (token) {
                     config.headers.Authorization = `Bearer ${token}`;
                 }
+                // Ensure full URL
+                if (config.url.startsWith('/')) {
+                    config.url = API_URL + config.url;
+                }
                 return config;
             },
             (error) => {
@@ -31,30 +33,40 @@ export const AuthProvider = ({ children }) => {
             }
         );
 
+        // Response interceptor for handling 401 errors
+        const responseInterceptor = axios.interceptors.response.use(
+            (response) => response,
+            (error) => {
+                if (error.response?.status === 401) {
+                    // Token expired or invalid
+                    localStorage.removeItem('token');
+                    setToken(null);
+                    setUser(null);
+                    window.location.href = '/login';
+                }
+                return Promise.reject(error);
+            }
+        );
+
         return () => {
             axios.interceptors.request.eject(interceptor);
+            axios.interceptors.response.eject(responseInterceptor);
         };
     }, []);
 
     // Check for existing token on mount
     useEffect(() => {
         const checkAuth = async () => {
-            const token = localStorage.getItem('token');
-            if (token) {
+            const storedToken = localStorage.getItem('token');
+            if (storedToken) {
                 try {
-                    const response = await axios.get('/auth/me');
+                    const response = await axios.get(`${API_URL}/auth/me`);
                     setUser(response.data);
-                    setToken(token);
+                    setToken(storedToken);
                     setError(null);
                     
                     // Connect WebSocket after user is authenticated
-                    try {
-                        websocketService.connect(API_URL.replace('/api', ''));
-                        websocketService.emit('user:online', response.data._id);
-                    } catch (wsError) {
-                        console.warn('WebSocket connection warning:', wsError);
-                        // Don't fail auth if WebSocket fails
-                    }
+                    connectWebSocket(response.data._id);
                 } catch (error) {
                     console.error('Auth check failed:', error);
                     localStorage.removeItem('token');
@@ -67,11 +79,43 @@ export const AuthProvider = ({ children }) => {
         checkAuth();
     }, []);
 
+    const connectWebSocket = (userId) => {
+        try {
+            const wsUrl = API_URL.replace('/api', '');
+            websocketService.connect(wsUrl);
+            
+            // Wait a bit for connection to establish
+            setTimeout(() => {
+                websocketService.emit('user:online', userId);
+                setWsConnected(true);
+                console.log('✓ WebSocket connected for user:', userId);
+            }, 500);
+
+            // Listen for connection status
+            websocketService.on('connect', () => {
+                setWsConnected(true);
+                websocketService.emit('user:online', userId);
+            });
+
+            websocketService.on('disconnect', () => {
+                setWsConnected(false);
+            });
+        } catch (wsError) {
+            console.warn('WebSocket connection warning:', wsError);
+            setWsConnected(false);
+        }
+    };
+
     const login = async (email, password) => {
         try {
             setError(null);
             setLoading(true);
-            const response = await axios.post('/auth/login', { email, password });
+            
+            const response = await axios.post(`${API_URL}/auth/login`, { 
+                email, 
+                password 
+            });
+            
             const { token, user } = response.data;
             
             // Store token
@@ -79,14 +123,8 @@ export const AuthProvider = ({ children }) => {
             setToken(token);
             setUser(user);
             
-            // Connect WebSocket after successful login
-            try {
-                websocketService.connect(API_URL.replace('/api', ''));
-                websocketService.emit('user:online', user.id);
-            } catch (wsError) {
-                console.warn('WebSocket connection warning:', wsError);
-                // Don't fail login if WebSocket fails
-            }
+            // Connect WebSocket
+            connectWebSocket(user.id);
             
             setLoading(false);
             return { success: true, user };
@@ -102,7 +140,9 @@ export const AuthProvider = ({ children }) => {
     const register = async (userData) => {
         try {
             setError(null);
-            const response = await axios.post('/auth/register', userData);
+            setLoading(true);
+            
+            const response = await axios.post(`${API_URL}/auth/register`, userData);
             const { token, user } = response.data;
             
             // Store token
@@ -110,19 +150,15 @@ export const AuthProvider = ({ children }) => {
             setToken(token);
             setUser(user);
             
-            // Connect WebSocket after successful registration
-            try {
-                websocketService.connect(API_URL.replace('/api', ''));
-                websocketService.emit('user:online', user.id);
-            } catch (wsError) {
-                console.warn('WebSocket connection warning:', wsError);
-                // Don't fail registration if WebSocket fails
-            }
+            // Connect WebSocket
+            connectWebSocket(user.id);
             
+            setLoading(false);
             return { success: true, user };
         } catch (error) {
             const errorMessage = error.response?.data?.error || error.message || 'Registration failed';
             setError(errorMessage);
+            setLoading(false);
             console.error('Registration failed:', error);
             return { 
                 success: false, 
@@ -136,6 +172,7 @@ export const AuthProvider = ({ children }) => {
         setToken(null);
         setUser(null);
         setError(null);
+        setWsConnected(false);
         
         // Disconnect WebSocket
         try {
@@ -143,6 +180,8 @@ export const AuthProvider = ({ children }) => {
         } catch (wsError) {
             console.warn('WebSocket disconnect warning:', wsError);
         }
+        
+        window.location.href = '/login';
     };
 
     const clearError = () => {
@@ -159,7 +198,8 @@ export const AuthProvider = ({ children }) => {
             logout, 
             API_URL,
             error,
-            clearError
+            clearError,
+            wsConnected
         }}>
             {children}
         </AuthContext.Provider>

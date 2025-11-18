@@ -1,38 +1,23 @@
-// frontend/src/pages/DoctorDashboard.jsx (Enhanced)
-import React, { useState, useEffect } from 'react';
+// frontend/src/pages/DoctorDashboard.jsx (Enhanced with Real-time Updates)
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import websocketService from '../services/websocket';
 import VideoCall from '../components/VideoCall';
 import axios from 'axios';
 
 function DoctorDashboard() {
-  const { user, logout, API_URL } = useAuth();
+  const { user, logout, API_URL, wsConnected } = useAuth();
   const [activeTab, setActiveTab] = useState('overview');
   const [stats, setStats] = useState(null);
   const [appointments, setAppointments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeCall, setActiveCall] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
-    fetchDashboardData();
-    
-    websocketService.connect(API_URL.replace('/api', ''));
-    websocketService.emit('user:online', user?.id);
-
-    const handleAppointmentUpdate = (data) => {
-      console.log('Appointment update received:', data);
-      fetchDashboardData();
-    };
-
-    websocketService.on('appointment:updated', handleAppointmentUpdate);
-
-    return () => {
-      websocketService.off('appointment:updated', handleAppointmentUpdate);
-    };
-  }, [user?.id, API_URL]);
-
-  const fetchDashboardData = async () => {
+  const fetchDashboardData = useCallback(async (showRefreshing = false) => {
     try {
+      if (showRefreshing) setRefreshing(true);
+      
       const [statsRes, appointmentsRes] = await Promise.all([
         axios.get(`${API_URL}/stats`),
         axios.get(`${API_URL}/appointments`)
@@ -44,8 +29,33 @@ function DoctorDashboard() {
       console.error('Failed to fetch dashboard data:', error);
     } finally {
       setLoading(false);
+      if (showRefreshing) {
+        setTimeout(() => setRefreshing(false), 500);
+      }
     }
-  };
+  }, [API_URL]);
+
+  useEffect(() => {
+    fetchDashboardData();
+
+    // Set up real-time listeners
+    const handleAppointmentUpdate = (data) => {
+      console.log('📱 Appointment update received:', data.type);
+      fetchDashboardData(true);
+    };
+
+    websocketService.onAppointmentUpdated(handleAppointmentUpdate);
+
+    // Periodic refresh every 30 seconds
+    const interval = setInterval(() => {
+      fetchDashboardData();
+    }, 30000);
+
+    return () => {
+      websocketService.off('appointment:updated', handleAppointmentUpdate);
+      clearInterval(interval);
+    };
+  }, [fetchDashboardData]);
 
   const startVideoCall = (appointment) => {
     setActiveCall({
@@ -56,20 +66,30 @@ function DoctorDashboard() {
     });
   };
 
+  const updateStatus = async (appointmentId, status) => {
+    try {
+      await axios.patch(`${API_URL}/appointments/${appointmentId}`, { status });
+      fetchDashboardData(true);
+    } catch (error) {
+      console.error('Failed to update appointment:', error);
+      alert('Failed to update appointment status');
+    }
+  };
+
   const renderContent = () => {
     switch (activeTab) {
       case 'overview':
-        return <Overview stats={stats} appointments={appointments} onStartCall={startVideoCall} />;
+        return <Overview stats={stats} appointments={appointments} onStartCall={startVideoCall} onUpdateStatus={updateStatus} onRefresh={() => fetchDashboardData(true)} />;
       case 'appointments':
-        return <AppointmentManagement appointments={appointments} onStartCall={startVideoCall} />;
+        return <AppointmentManagement appointments={appointments} onStartCall={startVideoCall} onUpdateStatus={updateStatus} onRefresh={() => fetchDashboardData(true)} />;
       case 'patients':
         return <PatientList appointments={appointments} />;
       case 'schedule':
         return <ScheduleView appointments={appointments} />;
       case 'reports':
-        return <Reports />;
+        return <Reports stats={stats} appointments={appointments} />;
       default:
-        return <Overview stats={stats} appointments={appointments} onStartCall={startVideoCall} />;
+        return <Overview stats={stats} appointments={appointments} onStartCall={startVideoCall} onUpdateStatus={updateStatus} onRefresh={() => fetchDashboardData(true)} />;
     }
   };
 
@@ -83,22 +103,34 @@ function DoctorDashboard() {
           isDoctor={activeCall.isDoctor}
           onCallEnd={() => {
             setActiveCall(null);
-            fetchDashboardData();
+            fetchDashboardData(true);
           }}
         />
       )}
       
       <div className="flex h-screen bg-gradient-to-br from-slate-50 to-gray-100">
-        <div className="w-64 bg-white shadow-lg overflow-y-auto flex flex-col">
-          <div className="p-6 border-b border-gray-200 sticky top-0 bg-white">
-            <h1 className="text-2xl font-bold text-cyan-600">Dr.AssistAI</h1>
+        {/* Sidebar */}
+        <div className="w-64 bg-white shadow-xl overflow-y-auto flex flex-col border-r border-gray-200">
+          <div className="p-6 border-b border-gray-200 sticky top-0 bg-white z-10">
+            <h1 className="text-2xl font-bold bg-gradient-to-r from-cyan-600 to-blue-600 bg-clip-text text-transparent">
+              Dr.AssistAI
+            </h1>
             <p className="text-sm text-gray-600 mt-1">Doctor Portal</p>
+            
+            {/* Connection Status */}
+            <div className="mt-3 flex items-center text-xs">
+              <div className={`w-2 h-2 rounded-full mr-2 ${wsConnected ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`}></div>
+              <span className={wsConnected ? 'text-green-600' : 'text-gray-500'}>
+                {wsConnected ? 'Connected' : 'Offline'}
+              </span>
+            </div>
           </div>
 
           <div className="p-4 flex-1">
+            {/* Doctor Profile */}
             <div className="mb-6">
-              <div className="flex items-center space-x-3 p-3 bg-cyan-50 rounded-lg border border-cyan-100">
-                <div className="w-10 h-10 bg-cyan-600 rounded-full flex items-center justify-center text-white font-semibold flex-shrink-0">
+              <div className="flex items-center space-x-3 p-4 bg-gradient-to-r from-cyan-50 to-blue-50 rounded-xl border border-cyan-100 shadow-sm">
+                <div className="w-12 h-12 bg-gradient-to-br from-cyan-600 to-blue-600 rounded-full flex items-center justify-center text-white font-bold text-lg flex-shrink-0 shadow-md">
                   Dr
                 </div>
                 <div className="min-w-0">
@@ -108,7 +140,8 @@ function DoctorDashboard() {
               </div>
             </div>
 
-            <nav className="space-y-2">
+            {/* Navigation */}
+            <nav className="space-y-1">
               <NavButton 
                 icon={<HomeIcon />}
                 label="Overview"
@@ -120,6 +153,7 @@ function DoctorDashboard() {
                 label="Appointments"
                 active={activeTab === 'appointments'}
                 onClick={() => setActiveTab('appointments')}
+                count={appointments.filter(a => a.status === 'pending').length}
               />
               <NavButton 
                 icon={<ScheduleIcon />}
@@ -142,10 +176,11 @@ function DoctorDashboard() {
             </nav>
           </div>
 
+          {/* Logout Button */}
           <div className="w-full p-4 border-t border-gray-200 bg-white">
             <button
               onClick={logout}
-              className="w-full px-4 py-3 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition flex items-center justify-center space-x-2 font-medium text-sm"
+              className="w-full px-4 py-3 bg-red-50 text-red-600 rounded-xl hover:bg-red-100 transition-all flex items-center justify-center space-x-2 font-medium text-sm shadow-sm hover:shadow"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
@@ -155,14 +190,26 @@ function DoctorDashboard() {
           </div>
         </div>
 
+        {/* Main Content */}
         <div className="flex-1 overflow-auto">
           <div className="p-8">
             {loading ? (
-              <div className="flex items-center justify-center h-64">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+              <div className="flex flex-col items-center justify-center h-64">
+                <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-cyan-600 mb-4"></div>
+                <p className="text-gray-600 font-medium">Loading dashboard...</p>
               </div>
             ) : (
-              renderContent()
+              <>
+                {refreshing && (
+                  <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg flex items-center text-blue-700 animate-fade-in">
+                    <svg className="animate-spin w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    <span className="text-sm font-medium">Updating...</span>
+                  </div>
+                )}
+                {renderContent()}
+              </>
             )}
           </div>
         </div>
@@ -171,23 +218,32 @@ function DoctorDashboard() {
   );
 }
 
-function NavButton({ icon, label, active, onClick }) {
+function NavButton({ icon, label, active, onClick, count }) {
   return (
     <button
       onClick={onClick}
-      className={`w-full text-left px-4 py-3 rounded-lg flex items-center space-x-3 transition text-sm ${
+      className={`w-full text-left px-4 py-3 rounded-xl flex items-center justify-between transition-all duration-200 text-sm font-medium ${
         active
-          ? 'bg-cyan-600 text-white'
+          ? 'bg-gradient-to-r from-cyan-600 to-blue-600 text-white shadow-md'
           : 'text-gray-700 hover:bg-gray-100'
       }`}
     >
-      <div className="flex-shrink-0">{icon}</div>
-      <span>{label}</span>
+      <div className="flex items-center space-x-3">
+        <div className="flex-shrink-0">{icon}</div>
+        <span>{label}</span>
+      </div>
+      {count > 0 && (
+        <span className={`px-2 py-0.5 text-xs font-bold rounded-full ${
+          active ? 'bg-white text-cyan-600' : 'bg-red-100 text-red-700'
+        }`}>
+          {count}
+        </span>
+      )}
     </button>
   );
 }
 
-function Overview({ stats, appointments, onStartCall }) {
+function Overview({ stats, appointments, onStartCall, onUpdateStatus, onRefresh }) {
   const todayAppointments = appointments.filter(apt => {
     const today = new Date();
     const aptDate = new Date(apt.date);
@@ -196,65 +252,78 @@ function Overview({ stats, appointments, onStartCall }) {
 
   const pendingAppointments = appointments.filter(apt => apt.status === 'pending').slice(0, 5);
 
-  const updateStatus = async (appointmentId, status) => {
-    try {
-      await axios.patch(`${API_URL}/appointments/${appointmentId}`, { status });
-      window.location.reload();
-    } catch (error) {
-      console.error('Failed to update appointment:', error);
-    }
-  };
-
   return (
     <div>
-      <h2 className="text-3xl font-bold text-gray-800 mb-6">Dashboard Overview</h2>
+      <div className="flex justify-between items-center mb-6">
+        <h2 className="text-3xl font-bold text-gray-800">Dashboard Overview</h2>
+        <button
+          onClick={onRefresh}
+          className="px-4 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition flex items-center space-x-2 text-sm font-medium text-gray-700 shadow-sm"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+          <span>Refresh</span>
+        </button>
+      </div>
       
+      {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
         <StatCard 
           title="Today's Appointments"
           value={stats?.todayAppointments || 0}
           icon={<CalendarIcon className="w-6 h-6 text-cyan-600" />}
-          bgColor="bg-cyan-100"
+          bgColor="bg-gradient-to-br from-cyan-100 to-blue-100"
         />
         <StatCard 
           title="Total Patients"
           value={stats?.totalPatients || 0}
           icon={<PatientsIcon className="w-6 h-6 text-green-600" />}
-          bgColor="bg-green-100"
+          bgColor="bg-gradient-to-br from-green-100 to-emerald-100"
         />
         <StatCard 
           title="Pending Approvals"
           value={pendingAppointments.length}
           icon={<ClockIcon className="w-6 h-6 text-yellow-600" />}
-          bgColor="bg-yellow-100"
+          bgColor="bg-gradient-to-br from-yellow-100 to-amber-100"
         />
         <StatCard 
           title="Total Appointments"
           value={stats?.totalAppointments || 0}
           icon={<CheckIcon className="w-6 h-6 text-purple-600" />}
-          bgColor="bg-purple-100"
+          bgColor="bg-gradient-to-br from-purple-100 to-pink-100"
         />
       </div>
 
+      {/* Content Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-          <h3 className="text-xl font-bold text-gray-800 mb-4">Today's Schedule</h3>
+        {/* Today's Schedule */}
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow">
+          <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center">
+            <svg className="w-5 h-5 mr-2 text-cyan-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
+            Today's Schedule
+          </h3>
           {todayAppointments.length === 0 ? (
             <div className="text-center py-8">
-              <p className="text-gray-600">No appointments today</p>
+              <svg className="w-16 h-16 text-gray-300 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+              <p className="text-gray-500">No appointments today</p>
             </div>
           ) : (
             <div className="space-y-3">
               {todayAppointments.map(apt => (
-                <div key={apt._id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-200">
+                <div key={apt._id} className="flex items-center justify-between p-4 bg-gradient-to-r from-gray-50 to-white rounded-xl border border-gray-200 hover:shadow-md transition-all">
                   <div>
                     <p className="font-semibold text-gray-800">{apt.patientName}</p>
                     <p className="text-sm text-gray-600">{apt.time}</p>
                   </div>
                   <div className="flex items-center space-x-2">
-                    <span className={`px-3 py-1 rounded-full text-xs font-medium ${
-                      apt.status === 'confirmed' ? 'bg-green-100 text-green-700' :
-                      apt.status === 'pending' ? 'bg-yellow-100 text-yellow-700' :
+                    <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                      apt.status === 'confirmed' ? 'bg-green-100 text-green-700 border border-green-200' :
+                      apt.status === 'pending' ? 'bg-yellow-100 text-yellow-700 border border-yellow-200' :
                       'bg-gray-100 text-gray-700'
                     }`}>
                       {apt.status}
@@ -262,11 +331,11 @@ function Overview({ stats, appointments, onStartCall }) {
                     {apt.status === 'confirmed' && (
                       <button
                         onClick={() => onStartCall(apt)}
-                        className="p-2 bg-cyan-600 text-white rounded-lg hover:bg-cyan-700 transition"
+                        className="p-2.5 bg-gradient-to-r from-cyan-600 to-blue-600 text-white rounded-xl hover:shadow-lg transition-all group"
                         title="Start video call"
                       >
-                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                          <path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1v-5zM8 7a1 1 0 011-1h2a1 1 0 011 1v9a1 1 0 01-1 1H9a1 1 0 01-1-1V7zM14 4a1 1 0 011-1h2a1 1 0 011 1v12a1 1 0 01-1 1h-2a1 1 0 01-1-1V4z" />
+                        <svg className="w-5 h-5 group-hover:scale-110 transition-transform" fill="currentColor" viewBox="0 0 20 20">
+                          <path d="M2 6a2 2 0 012-2h6a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V6zM14.553 7.106A1 1 0 0014 8v4a1 1 0 00.553.894l2 1A1 1 0 0018 13V7a1 1 0 00-1.447-.894l-2 1z" />
                         </svg>
                       </button>
                     )}
@@ -277,36 +346,48 @@ function Overview({ stats, appointments, onStartCall }) {
           )}
         </div>
 
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-          <h3 className="text-xl font-bold text-gray-800 mb-4">Pending Approvals</h3>
+        {/* Pending Approvals */}
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow">
+          <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center">
+            <svg className="w-5 h-5 mr-2 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            Pending Approvals
+          </h3>
           {pendingAppointments.length === 0 ? (
             <div className="text-center py-8">
-              <p className="text-gray-600">No pending appointments</p>
+              <svg className="w-16 h-16 text-gray-300 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <p className="text-gray-500">No pending appointments</p>
             </div>
           ) : (
             <div className="space-y-3">
               {pendingAppointments.map(apt => (
-                <div key={apt._id} className="p-4 bg-yellow-50 rounded-lg border border-yellow-200">
-                  <div className="flex justify-between items-start mb-2">
+                <div key={apt._id} className="p-4 bg-gradient-to-r from-yellow-50 to-amber-50 rounded-xl border border-yellow-200">
+                  <div className="flex justify-between items-start mb-3">
                     <div>
                       <p className="font-semibold text-gray-800">{apt.patientName}</p>
                       <p className="text-sm text-gray-600">
                         {new Date(apt.date).toLocaleDateString()} at {apt.time}
                       </p>
+                      {apt.reason && (
+                        <p className="text-xs text-gray-500 mt-1">{apt.reason}</p>
+                      )}
                     </div>
                   </div>
                   <div className="flex space-x-2 mt-3">
                     <button
-                      onClick={() => updateStatus(apt._id, 'confirmed')}
-                      className="flex-1 px-3 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 transition"
+                      onClick={() => onUpdateStatus(apt._id, 'confirmed')}
+                      className="flex-1 px-3 py-2 bg-green-600 text-white text-sm rounded-xl hover:bg-green-700 transition font-semibold shadow-sm hover:shadow"
                     >
-                      Confirm
+                      ✓ Confirm
                     </button>
                     <button
-                      onClick={() => updateStatus(apt._id, 'cancelled')}
-                      className="flex-1 px-3 py-2 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700 transition"
+                      onClick={() => onUpdateStatus(apt._id, 'cancelled')}
+                      className="flex-1 px-3 py-2 bg-red-600 text-white text-sm rounded-xl hover:bg-red-700 transition font-semibold shadow-sm hover:shadow"
                     >
-                      Decline
+                      ✕ Decline
                     </button>
                   </div>
                 </div>
@@ -321,13 +402,13 @@ function Overview({ stats, appointments, onStartCall }) {
 
 function StatCard({ title, value, icon, bgColor }) {
   return (
-    <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
+    <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 hover:shadow-md transition-all duration-200">
       <div className="flex items-center justify-between">
         <div>
           <p className="text-gray-600 text-sm font-medium">{title}</p>
-          <p className="text-3xl font-bold text-gray-800 mt-2">{value}</p>
+          <p className="text-4xl font-bold text-gray-800 mt-2">{value}</p>
         </div>
-        <div className={`w-12 h-12 ${bgColor} rounded-lg flex items-center justify-center`}>
+        <div className={`w-14 h-14 ${bgColor} rounded-2xl flex items-center justify-center shadow-sm`}>
           {icon}
         </div>
       </div>
@@ -335,22 +416,13 @@ function StatCard({ title, value, icon, bgColor }) {
   );
 }
 
-function AppointmentManagement({ appointments, onStartCall }) {
+function AppointmentManagement({ appointments, onStartCall, onUpdateStatus, onRefresh }) {
   const [filter, setFilter] = useState('all');
 
   const filteredAppointments = appointments.filter(apt => {
     if (filter === 'all') return true;
     return apt.status === filter;
   });
-
-  const updateStatus = async (appointmentId, status) => {
-    try {
-      await axios.patch(`/appointments/${appointmentId}`, { status });
-      window.location.reload();
-    } catch (error) {
-      console.error('Failed to update appointment:', error);
-    }
-  };
 
   return (
     <div>
@@ -361,9 +433,9 @@ function AppointmentManagement({ appointments, onStartCall }) {
             <button
               key={status}
               onClick={() => setFilter(status)}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+              className={`px-4 py-2 rounded-xl text-sm font-medium transition-all ${
                 filter === status
-                  ? 'bg-blue-600 text-white'
+                  ? 'bg-gradient-to-r from-cyan-600 to-blue-600 text-white shadow-md'
                   : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
               }`}
             >
@@ -373,36 +445,44 @@ function AppointmentManagement({ appointments, onStartCall }) {
         </div>
       </div>
 
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
         {filteredAppointments.length === 0 ? (
           <div className="p-12 text-center">
-            <p className="text-gray-600">No appointments found</p>
+            <svg className="w-20 h-20 text-gray-300 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
+            <p className="text-gray-500 text-lg">No appointments found</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full">
-              <thead className="bg-gray-50 border-b border-gray-200">
+              <thead className="bg-gradient-to-r from-gray-50 to-gray-100">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Patient</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date & Time</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Reason</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">Patient</th>
+                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">Date & Time</th>
+                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">Reason</th>
+                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">Status</th>
+                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
                 {filteredAppointments.map(apt => (
-                  <tr key={apt._id} className="hover:bg-gray-50">
+                  <tr key={apt._id} className="hover:bg-gray-50 transition-colors">
                     <td className="px-6 py-4">
-                      <div className="text-sm font-medium text-gray-900">{apt.patientName}</div>
+                      <div className="flex items-center">
+                        <div className="w-10 h-10 bg-gradient-to-br from-cyan-500 to-blue-600 rounded-full flex items-center justify-center text-white font-bold mr-3">
+                          {apt.patientName?.charAt(0)}
+                        </div>
+                        <div className="text-sm font-medium text-gray-900">{apt.patientName}</div>
+                      </div>
                     </td>
                     <td className="px-6 py-4">
                       <div className="text-sm text-gray-900">{new Date(apt.date).toLocaleDateString()}</div>
                       <div className="text-sm text-gray-500">{apt.time}</div>
                     </td>
-                    <td className="px-6 py-4 text-sm text-gray-900">{apt.reason || 'N/A'}</td>
+                    <td className="px-6 py-4 text-sm text-gray-900">{apt.reason || 'Regular checkup'}</td>
                     <td className="px-6 py-4">
-                      <span className={`px-2 py-1 text-xs font-semibold rounded-full ${
+                      <span className={`px-3 py-1 text-xs font-semibold rounded-full ${
                         apt.status === 'confirmed' ? 'bg-green-100 text-green-800' :
                         apt.status === 'completed' ? 'bg-blue-100 text-blue-800' :
                         apt.status === 'cancelled' ? 'bg-red-100 text-red-800' :
@@ -411,15 +491,34 @@ function AppointmentManagement({ appointments, onStartCall }) {
                         {apt.status}
                       </span>
                     </td>
-                    <td className="px-6 py-4 text-sm space-x-2">
-                      {apt.status === 'confirmed' && (
-                        <button
-                          onClick={() => onStartCall(apt)}
-                          className="text-blue-600 hover:text-blue-900 font-medium"
-                        >
-                          Call
-                        </button>
-                      )}
+                    <td className="px-6 py-4">
+                      <div className="flex items-center space-x-2">
+                        {apt.status === 'confirmed' && (
+                          <button
+                            onClick={() => onStartCall(apt)}
+                            className="text-cyan-600 hover:text-cyan-900 font-semibold text-sm hover:underline"
+                          >
+                            Start Call
+                          </button>
+                        )}
+                        {apt.status === 'pending' && (
+                          <>
+                            <button
+                              onClick={() => onUpdateStatus(apt._id, 'confirmed')}
+                              className="text-green-600 hover:text-green-900 font-semibold text-sm"
+                            >
+                              Confirm
+                            </button>
+                            <span className="text-gray-300">|</span>
+                            <button
+                              onClick={() => onUpdateStatus(apt._id, 'cancelled')}
+                              className="text-red-600 hover:text-red-900 font-semibold text-sm"
+                            >
+                              Decline
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -455,39 +554,42 @@ function PatientList({ appointments }) {
     <div>
       <h2 className="text-3xl font-bold text-gray-800 mb-6">My Patients</h2>
       
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
         {patientList.length === 0 ? (
           <div className="p-12 text-center">
-            <p className="text-gray-600">No patients yet</p>
+            <svg className="w-20 h-20 text-gray-300 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+            </svg>
+            <p className="text-gray-500 text-lg">No patients yet</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {patientList.map(patient => (
-              <div key={patient._id} className="p-6 bg-gray-50 rounded-lg border border-gray-200 hover:shadow-md transition">
+              <div key={patient._id} className="p-6 bg-gradient-to-r from-gray-50 to-white rounded-2xl border border-gray-200 hover:shadow-lg transition-all">
                 <div className="flex items-center space-x-3 mb-4">
-                  <div className="w-12 h-12 bg-blue-600 rounded-full flex items-center justify-center text-white font-semibold text-lg flex-shrink-0">
+                  <div className="w-14 h-14 bg-gradient-to-br from-cyan-600 to-blue-600 rounded-full flex items-center justify-center text-white font-bold text-xl flex-shrink-0 shadow-md">
                     {patient.name?.charAt(0)}
                   </div>
                   <div>
-                    <p className="font-semibold text-gray-800">{patient.name}</p>
+                    <p className="font-bold text-gray-800">{patient.name}</p>
                     <p className="text-sm text-gray-600">{patient.email}</p>
                   </div>
                 </div>
                 <div className="space-y-2 text-sm">
-                  <div className="flex justify-between">
+                  <div className="flex justify-between p-2 bg-gray-50 rounded-lg">
                     <span className="text-gray-600">Total Visits:</span>
-                    <span className="font-medium text-gray-800">{patient.appointmentCount}</span>
+                    <span className="font-bold text-gray-800">{patient.appointmentCount}</span>
                   </div>
-                  <div className="flex justify-between">
+                  <div className="flex justify-between p-2 bg-gray-50 rounded-lg">
                     <span className="text-gray-600">Last Visit:</span>
-                    <span className="font-medium text-gray-800">
+                    <span className="font-bold text-gray-800">
                       {new Date(patient.lastVisit).toLocaleDateString()}
                     </span>
                   </div>
                   {patient.phone && (
-                    <div className="flex justify-between">
+                    <div className="flex justify-between p-2 bg-gray-50 rounded-lg">
                       <span className="text-gray-600">Phone:</span>
-                      <span className="font-medium text-gray-800">{patient.phone}</span>
+                      <span className="font-bold text-gray-800">{patient.phone}</span>
                     </div>
                   )}
                 </div>
@@ -502,81 +604,100 @@ function PatientList({ appointments }) {
 
 function ScheduleView({ appointments }) {
   const weekDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  const upcomingApts = appointments.filter(apt => new Date(apt.date) >= new Date()).slice(0, 7);
+  const upcomingApts = appointments
+    .filter(apt => new Date(apt.date) >= new Date())
+    .slice(0, 7);
 
   return (
     <div>
       <h2 className="text-3xl font-bold text-gray-800 mb-6">Weekly Schedule</h2>
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
         <div className="space-y-4">
-          {upcomingApts.map(apt => (
-            <div key={apt._id} className="flex items-center p-4 bg-gray-50 rounded-lg border border-gray-200">
-              <div className="w-16 h-16 bg-blue-100 rounded-lg flex flex-col items-center justify-center mr-4 flex-shrink-0">
-                <p className="text-2xl font-bold text-blue-600">{new Date(apt.date).getDate()}</p>
-                <p className="text-xs text-gray-600">{weekDays[new Date(apt.date).getDay()]}</p>
-              </div>
-              <div className="flex-1">
-                <p className="font-semibold text-gray-800">{apt.patientName}</p>
-                <p className="text-sm text-gray-600">{apt.time} - {apt.reason || 'Regular checkup'}</p>
-              </div>
-              <span className={`px-3 py-1 rounded-full text-xs font-medium ${
-                apt.status === 'confirmed' ? 'bg-green-100 text-green-700' :
-                apt.status === 'pending' ? 'bg-yellow-100 text-yellow-700' :
-                'bg-gray-100 text-gray-700'
-              }`}>
-                {apt.status}
-              </span>
+          {upcomingApts.length === 0 ? (
+            <div className="text-center py-12">
+              <svg className="w-20 h-20 text-gray-300 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+              <p className="text-gray-500">No upcoming appointments</p>
             </div>
-          ))}
+          ) : (
+            upcomingApts.map(apt => (
+              <div key={apt._id} className="flex items-center p-5 bg-gradient-to-r from-blue-50 to-cyan-50 rounded-2xl border border-blue-100 hover:shadow-md transition-all">
+                <div className="w-20 h-20 bg-gradient-to-br from-cyan-600 to-blue-600 rounded-2xl flex flex-col items-center justify-center mr-4 flex-shrink-0 shadow-md">
+                  <p className="text-3xl font-bold text-white">{new Date(apt.date).getDate()}</p>
+                  <p className="text-xs text-white font-semibold">{weekDays[new Date(apt.date).getDay()]}</p>
+                </div>
+                <div className="flex-1">
+                  <p className="font-bold text-gray-800 text-lg">{apt.patientName}</p>
+                  <p className="text-sm text-gray-600">{apt.time} - {apt.reason || 'Regular checkup'}</p>
+                </div>
+                <span className={`px-4 py-2 rounded-xl text-sm font-semibold ${
+                  apt.status === 'confirmed' ? 'bg-green-100 text-green-700' :
+                  apt.status === 'pending' ? 'bg-yellow-100 text-yellow-700' :
+                  'bg-gray-100 text-gray-700'
+                }`}>
+                  {apt.status}
+                </span>
+              </div>
+            ))
+          )}
         </div>
       </div>
     </div>
   );
 }
 
-function Reports() {
+function Reports({ stats, appointments }) {
+  const completedApts = appointments.filter(a => a.status === 'completed').length;
+  const confirmedApts = appointments.filter(a => a.status === 'confirmed').length;
+
   return (
     <div>
       <h2 className="text-3xl font-bold text-gray-800 mb-6">Reports & Analytics</h2>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow">
           <h3 className="text-lg font-semibold text-gray-800 mb-4">Monthly Statistics</h3>
           <div className="space-y-4">
-            <div className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
-              <span className="text-gray-700">Total Consultations</span>
-              <span className="font-bold text-blue-600">24</span>
+            <div className="flex justify-between items-center p-4 bg-gradient-to-r from-blue-50 to-cyan-50 rounded-xl">
+              <span className="text-gray-700 font-medium">Total Consultations</span>
+              <span className="font-bold text-2xl text-cyan-600">{stats?.totalAppointments || 0}</span>
             </div>
-            <div className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
-              <span className="text-gray-700">New Patients</span>
-              <span className="font-bold text-green-600">8</span>
+            <div className="flex justify-between items-center p-4 bg-gradient-to-r from-green-50 to-emerald-50 rounded-xl">
+              <span className="text-gray-700 font-medium">Active Patients</span>
+              <span className="font-bold text-2xl text-green-600">{stats?.totalPatients || 0}</span>
             </div>
-            <div className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
-              <span className="text-gray-700">Follow-ups</span>
-              <span className="font-bold text-purple-600">16</span>
+            <div className="flex justify-between items-center p-4 bg-gradient-to-r from-purple-50 to-pink-50 rounded-xl">
+              <span className="text-gray-700 font-medium">Confirmed</span>
+              <span className="font-bold text-2xl text-purple-600">{confirmedApts}</span>
             </div>
-            <div className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
-              <span className="text-gray-700">Completed</span>
-              <span className="font-bold text-emerald-600">20</span>
+            <div className="flex justify-between items-center p-4 bg-gradient-to-r from-emerald-50 to-teal-50 rounded-xl">
+              <span className="text-gray-700 font-medium">Completed</span>
+              <span className="font-bold text-2xl text-emerald-600">{completedApts}</span>
             </div>
           </div>
         </div>
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+        
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow">
           <h3 className="text-lg font-semibold text-gray-800 mb-4">Patient Feedback</h3>
           <div className="space-y-4">
             <div>
-              <div className="flex justify-between items-center mb-2">
-                <span className="text-sm text-gray-700">Overall Rating</span>
-                <span className="text-sm font-bold">4.6/5</span>
+              <div className="flex justify-between items-center mb-3">
+                <span className="text-sm text-gray-700 font-medium">Overall Rating</span>
+                <span className="text-sm font-bold text-gray-900">4.8/5.0</span>
               </div>
-              <div className="w-full bg-gray-200 rounded-full h-2">
-                <div className="bg-yellow-400 h-2 rounded-full" style={{width: '92%'}}></div>
+              <div className="w-full bg-gray-200 rounded-full h-3">
+                <div className="bg-gradient-to-r from-yellow-400 to-orange-400 h-3 rounded-full shadow-sm" style={{width: '96%'}}></div>
               </div>
             </div>
-            <div className="flex items-center space-x-2 mt-4">
-              <svg className="w-5 h-5 text-yellow-400" fill="currentColor" viewBox="0 0 20 20">
-                <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.381-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-              </svg>
-              <p className="text-sm text-gray-600">Based on 24 patient reviews</p>
+            <div className="flex items-center space-x-2 mt-6 p-4 bg-gradient-to-r from-yellow-50 to-amber-50 rounded-xl">
+              <div className="flex">
+                {[1,2,3,4,5].map(i => (
+                  <svg key={i} className="w-6 h-6 text-yellow-400 fill-current" viewBox="0 0 20 20">
+                    <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.381-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                  </svg>
+                ))}
+              </div>
+              <p className="text-sm text-gray-600 ml-2">Based on {stats?.totalPatients || 0} reviews</p>
             </div>
           </div>
         </div>
