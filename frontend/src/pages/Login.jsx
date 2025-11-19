@@ -1,4 +1,4 @@
-// frontend/src/pages/Login.jsx (Updated - Same Box Size)
+// frontend/src/pages/Login.jsx (Unified Login)
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
@@ -7,26 +7,31 @@ export default function Login() {
   const [formData, setFormData] = useState({ email: "", password: "" });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [userType, setUserType] = useState("patient");
   const { login } = useAuth();
   const navigate = useNavigate();
 
-  const handleChange = (e) =>
+  const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
+    setError("");
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
     setLoading(true);
+
     if (!formData.email || !formData.password) {
       setError("Please fill in all fields");
       setLoading(false);
       return;
     }
+
     try {
       const result = await login(formData.email, formData.password);
       if (result?.success) {
-        navigate(userType === "doctor" ? "/doctor-dashboard" : "/patient-dashboard");
+        // Navigate based on user role
+        const dashboard = result.user.role === "doctor" ? "/doctor-dashboard" : "/patient-dashboard";
+        navigate(dashboard);
       }
     } catch (err) {
       setError(err?.response?.data?.error || "Login failed. Please check your credentials.");
@@ -37,162 +42,144 @@ export default function Login() {
   };
 
   return (
-    <div
-      className="min-h-screen flex items-center justify-center bg-fixed bg-cover bg-center p-6"
-      style={{ backgroundImage: 'url("/assets/medical-bg.png")' }}
-    >
-      <div className="w-full max-w-6xl">
-        {/* Split card - Fixed height */}
-        <div className="bg-transparent rounded-2xl overflow-hidden shadow-2xl grid grid-cols-1 md:grid-cols-2 h-[650px]">
-
-          {/* LEFT PANEL */}
-          <div
-            className="relative flex items-center justify-center hidden md:flex"
-            style={{
-              background: "linear-gradient(180deg, #E0F7FA 0%, #B2EBF2 100%)",
-            }}
-          >
-            <div
-              aria-hidden
-              className="absolute inset-0"
-              style={{
-                background: "radial-gradient(circle at 40% 40%, rgba(34,211,238,0.1), rgba(6,182,212,0.05))",
-                filter: "blur(10px)",
-              }}
-            />
-            <div className="relative flex flex-col items-center text-center z-10 px-6">
-              <div className="w-56 h-56 rounded-full overflow-hidden border-4 border-white/70 shadow-2xl hover:scale-105 transition-all duration-300">
-                <img
-                  src="/assets/doctorimage.jpeg"
-                  alt="Doctor"
-                  className="w-full h-full object-cover"
-                  draggable={false}
-                />
-              </div>
-              <p className="mt-8 text-cyan-700/80 text-sm max-w-[220px]">
-                We at <span className="font-semibold text-cyan-900">Dr.AssistAI</span> are always focused on your health.
-              </p>
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-cyan-50 via-blue-50 to-indigo-100 p-6">
+      <div className="w-full max-w-md">
+        {/* Login Card */}
+        <div className="bg-white rounded-3xl shadow-2xl overflow-hidden">
+          {/* Header */}
+          <div className="bg-gradient-to-r from-cyan-600 to-blue-600 p-8 text-center">
+            <div className="w-20 h-20 bg-white rounded-full flex items-center justify-center mx-auto mb-4 shadow-lg">
+              <svg className="w-10 h-10 text-cyan-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+              </svg>
             </div>
+            <h1 className="text-3xl font-bold text-white mb-2">Dr.AssistAI</h1>
+            <p className="text-blue-100">Welcome back! Please login to continue</p>
           </div>
 
-          {/* RIGHT PANEL - FORM */}
-          <div className="p-8 md:p-10 flex items-center justify-center bg-white overflow-y-auto">
-            <div className="w-full max-w-sm">
-              {/* Logo */}
-              <div className="flex justify-center mb-3">
-                <div className="text-3xl font-bold text-cyan-600">Dr.AssistAI</div>
+          {/* Form */}
+          <div className="p-8">
+            {error && (
+              <div className="mb-6 p-4 bg-red-50 border-2 border-red-200 text-red-700 rounded-xl flex items-start">
+                <svg className="w-5 h-5 mr-2 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <span className="text-sm">{error}</span>
               </div>
+            )}
 
-              <h2 className="text-2xl md:text-3xl font-semibold text-cyan-700 text-center mb-1">
-                Welcome Back
-              </h2>
-              <p className="text-center text-sm text-gray-600 mb-5">
-                Your health. Our priority.
-              </p>
-
-              {/* Login Type Toggle */}
-              <div className="flex justify-center mb-5 bg-cyan-50 rounded-full p-1">
-                <button
-                  onClick={() => setUserType("patient")}
-                  className={`w-1/2 py-2 rounded-full font-semibold text-sm transition-all ${
-                    userType === "patient"
-                      ? "bg-cyan-600 text-white shadow-md"
-                      : "text-cyan-700"
-                  }`}
-                >
-                  Patient
-                </button>
-                <button
-                  onClick={() => setUserType("doctor")}
-                  className={`w-1/2 py-2 rounded-full font-semibold text-sm transition-all ${
-                    userType === "doctor"
-                      ? "bg-cyan-600 text-white shadow-md"
-                      : "text-cyan-700"
-                  }`}
-                >
-                  Doctor
-                </button>
-              </div>
-
-              {error && (
-                <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">
-                  {error}
-                </div>
-              )}
-
-              <form onSubmit={handleSubmit} className="space-y-3">
-                <div>
-                  <label className="block text-xs font-medium text-cyan-700 mb-1">
-                    Email Address
-                  </label>
+            <form onSubmit={handleSubmit} className="space-y-5">
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Email Address
+                </label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                    </svg>
+                  </div>
                   <input
                     type="email"
                     name="email"
                     value={formData.email}
                     onChange={handleChange}
-                    className="w-full px-3 py-2.5 rounded-lg border border-gray-200 bg-white placeholder-gray-400 outline-none focus:ring-2 focus:ring-cyan-400 text-sm"
+                    className="w-full pl-10 pr-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-cyan-500 focus:border-transparent transition-all"
                     placeholder="you@example.com"
                     required
                     disabled={loading}
                   />
                 </div>
+              </div>
 
-                <div>
-                  <label className="block text-xs font-medium text-cyan-700 mb-1">
-                    Password
-                  </label>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Password
+                </label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                    </svg>
+                  </div>
                   <input
                     type="password"
                     name="password"
                     value={formData.password}
                     onChange={handleChange}
-                    className="w-full px-3 py-2.5 rounded-lg border border-gray-200 bg-white placeholder-gray-400 outline-none focus:ring-2 focus:ring-cyan-400 text-sm"
+                    className="w-full pl-10 pr-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-cyan-500 focus:border-transparent transition-all"
                     placeholder="••••••••"
                     required
                     disabled={loading}
                   />
                 </div>
-
-                <div className="flex items-center justify-between text-xs">
-                  <label className="flex items-center gap-2 text-gray-600">
-                    <input type="checkbox" className="w-3 h-3 rounded border-gray-300" />
-                    Remember me
-                  </label>
-                  <Link to="/forgot-password" className="text-cyan-700 hover:underline">
-                    Forgot password?
-                  </Link>
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="w-full py-2.5 rounded-lg text-white font-semibold transition transform hover:scale-105 text-sm bg-cyan-600 hover:bg-cyan-700"
-                >
-                  {loading
-                    ? "Signing in..."
-                    : `Sign In as ${userType === "doctor" ? "Doctor" : "Patient"}`}
-                </button>
-              </form>
-
-              <div className="mt-4 text-center text-xs text-gray-600">or sign in with</div>
-              <div className="mt-2.5 flex gap-2 justify-center">
-                <button className="flex-1 px-3 py-2 rounded-md border border-gray-200 hover:shadow-md transition text-sm">
-                  Google
-                </button>
-                <button className="flex-1 px-3 py-2 rounded-md border border-gray-200 hover:shadow-md transition text-sm">
-                  Apple
-                </button>
               </div>
 
-              <p className="mt-4 text-center text-xs text-gray-600">
-                Don't have an account?{' '}
-                <Link to="/register" className="text-cyan-700 hover:underline font-semibold">
-                  Sign up
+              <div className="flex items-center justify-between text-sm">
+                <label className="flex items-center">
+                  <input type="checkbox" className="w-4 h-4 text-cyan-600 border-gray-300 rounded focus:ring-cyan-500" />
+                  <span className="ml-2 text-gray-600">Remember me</span>
+                </label>
+                <Link to="/forgot-password" className="text-cyan-600 hover:text-cyan-700 font-semibold">
+                  Forgot password?
                 </Link>
-              </p>
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full bg-gradient-to-r from-cyan-600 to-blue-600 text-white py-3 rounded-xl font-bold text-lg hover:shadow-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+              >
+                {loading ? (
+                  <>
+                    <svg className="animate-spin h-5 w-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Signing in...
+                  </>
+                ) : (
+                  "Sign In"
+                )}
+              </button>
+            </form>
+
+            {/* Divider */}
+            <div className="relative my-6">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-gray-300"></div>
+              </div>
+              <div className="relative flex justify-center text-sm">
+                <span className="px-2 bg-white text-gray-500">Don't have an account?</span>
+              </div>
+            </div>
+
+            {/* Register Link */}
+            <Link
+              to="/register"
+              className="block w-full text-center py-3 border-2 border-cyan-600 text-cyan-600 rounded-xl font-semibold hover:bg-cyan-50 transition-all"
+            >
+              Create New Account
+            </Link>
+
+            {/* Quick Login Info */}
+            <div className="mt-6 p-4 bg-blue-50 rounded-xl border border-blue-200">
+              <p className="text-xs text-blue-800 font-semibold mb-2">Test Accounts:</p>
+              <div className="space-y-1 text-xs text-blue-700">
+                <p>👨‍⚕️ Doctor: doctor@test.com / doctor123</p>
+                <p>👤 Patient: patient@test.com / patient123</p>
+              </div>
             </div>
           </div>
         </div>
+
+        {/* Footer */}
+        <p className="text-center text-sm text-gray-600 mt-6">
+          By signing in, you agree to our{' '}
+          <Link to="/terms" className="text-cyan-600 hover:underline">Terms</Link>
+          {' '}and{' '}
+          <Link to="/privacy" className="text-cyan-600 hover:underline">Privacy Policy</Link>
+        </p>
       </div>
     </div>
   );

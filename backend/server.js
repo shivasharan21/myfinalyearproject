@@ -234,6 +234,13 @@ io.on('connection', (socket) => {
       if (otherSocketId) {
         io.to(otherSocketId).emit('call:ended', { appointmentId });
       }
+      
+      // Also emit to the caller
+      const callerSocketId = userSockets.get(callData.callerId.toString());
+      if (callerSocketId && callerSocketId !== otherSocketId) {
+        io.to(callerSocketId).emit('call:ended', { appointmentId });
+      }
+      
       activeCalls.delete(appointmentId);
       console.log(`✓ Call ended for appointment ${appointmentId}`);
     }

@@ -1,8 +1,9 @@
-// frontend/src/pages/DoctorDashboard.jsx (Enhanced with Real-time Updates)
+// frontend/src/pages/DoctorDashboard.jsx (With Notifications & Complete Feature)
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import websocketService from '../services/websocket';
 import VideoCall from '../components/VideoCall';
+import NotificationSystem from '../components/NotificationSystem';
 import axios from 'axios';
 
 function DoctorDashboard() {
@@ -13,6 +14,7 @@ function DoctorDashboard() {
   const [loading, setLoading] = useState(true);
   const [activeCall, setActiveCall] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [incomingCall, setIncomingCall] = useState(null);
 
   const fetchDashboardData = useCallback(async (showRefreshing = false) => {
     try {
@@ -38,21 +40,26 @@ function DoctorDashboard() {
   useEffect(() => {
     fetchDashboardData();
 
-    // Set up real-time listeners
     const handleAppointmentUpdate = (data) => {
       console.log('📱 Appointment update received:', data.type);
       fetchDashboardData(true);
     };
 
-    websocketService.onAppointmentUpdated(handleAppointmentUpdate);
+    const handleIncomingCall = (data) => {
+      console.log('📞 Incoming call from:', data.callerName);
+      setIncomingCall(data);
+    };
 
-    // Periodic refresh every 30 seconds
+    websocketService.onAppointmentUpdated(handleAppointmentUpdate);
+    websocketService.onCallIncoming(handleIncomingCall);
+
     const interval = setInterval(() => {
       fetchDashboardData();
     }, 30000);
 
     return () => {
       websocketService.off('appointment:updated', handleAppointmentUpdate);
+      websocketService.off('call:incoming', handleIncomingCall);
       clearInterval(interval);
     };
   }, [fetchDashboardData]);
@@ -64,6 +71,26 @@ function DoctorDashboard() {
       otherUserName: appointment.patientName,
       isDoctor: true
     });
+  };
+
+  const answerCall = () => {
+    if (incomingCall) {
+      const appointment = appointments.find(a => a._id === incomingCall.appointmentId);
+      if (appointment) {
+        startVideoCall(appointment);
+        setIncomingCall(null);
+      }
+    }
+  };
+
+  const rejectCall = () => {
+    if (incomingCall) {
+      websocketService.rejectCall({
+        appointmentId: incomingCall.appointmentId,
+        userId: user.id
+      });
+      setIncomingCall(null);
+    }
   };
 
   const updateStatus = async (appointmentId, status) => {
@@ -95,6 +122,37 @@ function DoctorDashboard() {
 
   return (
     <>
+      {/* Incoming Call Modal */}
+      {incomingCall && (
+        <div className="fixed inset-0 bg-black/75 z-[100] flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl animate-bounce-in">
+            <div className="text-center">
+              <div className="w-24 h-24 bg-gradient-to-br from-green-500 to-emerald-600 rounded-full flex items-center justify-center mx-auto mb-6 animate-pulse">
+                <svg className="w-12 h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                </svg>
+              </div>
+              <h3 className="text-2xl font-bold text-gray-900 mb-2">Incoming Call</h3>
+              <p className="text-lg text-gray-600 mb-8">{incomingCall.callerName} is calling...</p>
+              <div className="flex gap-4">
+                <button
+                  onClick={rejectCall}
+                  className="flex-1 py-4 bg-red-500 text-white rounded-xl font-bold hover:bg-red-600 transition-all"
+                >
+                  Decline
+                </button>
+                <button
+                  onClick={answerCall}
+                  className="flex-1 py-4 bg-green-500 text-white rounded-xl font-bold hover:bg-green-600 transition-all"
+                >
+                  Answer
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {activeCall && (
         <VideoCall
           appointmentId={activeCall.appointmentId}
@@ -117,7 +175,6 @@ function DoctorDashboard() {
             </h1>
             <p className="text-sm text-gray-600 mt-1">Doctor Portal</p>
             
-            {/* Connection Status */}
             <div className="mt-3 flex items-center text-xs">
               <div className={`w-2 h-2 rounded-full mr-2 ${wsConnected ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`}></div>
               <span className={wsConnected ? 'text-green-600' : 'text-gray-500'}>
@@ -127,20 +184,19 @@ function DoctorDashboard() {
           </div>
 
           <div className="p-4 flex-1">
-            {/* Doctor Profile */}
             <div className="mb-6">
               <div className="flex items-center space-x-3 p-4 bg-gradient-to-r from-cyan-50 to-blue-50 rounded-xl border border-cyan-100 shadow-sm">
                 <div className="w-12 h-12 bg-gradient-to-br from-cyan-600 to-blue-600 rounded-full flex items-center justify-center text-white font-bold text-lg flex-shrink-0 shadow-md">
                   Dr
                 </div>
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <p className="font-semibold text-gray-800 truncate">{user?.name}</p>
                   <p className="text-xs text-gray-600 truncate">{user?.specialization}</p>
                 </div>
+                <NotificationSystem userId={user?.id} userRole="doctor" />
               </div>
             </div>
 
-            {/* Navigation */}
             <nav className="space-y-1">
               <NavButton 
                 icon={<HomeIcon />}
@@ -176,7 +232,6 @@ function DoctorDashboard() {
             </nav>
           </div>
 
-          {/* Logout Button */}
           <div className="w-full p-4 border-t border-gray-200 bg-white">
             <button
               onClick={logout}
@@ -214,6 +269,18 @@ function DoctorDashboard() {
           </div>
         </div>
       </div>
+
+      <style>{`
+        @keyframes bounce-in {
+          0% { transform: scale(0.3); opacity: 0; }
+          50% { transform: scale(1.05); }
+          70% { transform: scale(0.9); }
+          100% { transform: scale(1); opacity: 1; }
+        }
+        .animate-bounce-in {
+          animation: bounce-in 0.5s ease-out;
+        }
+      `}</style>
     </>
   );
 }
@@ -252,6 +319,12 @@ function Overview({ stats, appointments, onStartCall, onUpdateStatus, onRefresh 
 
   const pendingAppointments = appointments.filter(apt => apt.status === 'pending').slice(0, 5);
 
+  const handleCompleteAppointment = (appointmentId) => {
+    if (window.confirm('Mark this appointment as completed?')) {
+      onUpdateStatus(appointmentId, 'completed');
+    }
+  };
+
   return (
     <div>
       <div className="flex justify-between items-center mb-6">
@@ -267,7 +340,6 @@ function Overview({ stats, appointments, onStartCall, onUpdateStatus, onRefresh 
         </button>
       </div>
       
-      {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
         <StatCard 
           title="Today's Appointments"
@@ -295,7 +367,6 @@ function Overview({ stats, appointments, onStartCall, onUpdateStatus, onRefresh 
         />
       </div>
 
-      {/* Content Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Today's Schedule */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow">
@@ -315,29 +386,37 @@ function Overview({ stats, appointments, onStartCall, onUpdateStatus, onRefresh 
           ) : (
             <div className="space-y-3">
               {todayAppointments.map(apt => (
-                <div key={apt._id} className="flex items-center justify-between p-4 bg-gradient-to-r from-gray-50 to-white rounded-xl border border-gray-200 hover:shadow-md transition-all">
-                  <div>
-                    <p className="font-semibold text-gray-800">{apt.patientName}</p>
-                    <p className="text-sm text-gray-600">{apt.time}</p>
-                  </div>
-                  <div className="flex items-center space-x-2">
+                <div key={apt._id} className="p-4 bg-gradient-to-r from-gray-50 to-white rounded-xl border border-gray-200 hover:shadow-md transition-all">
+                  <div className="flex items-start justify-between mb-3">
+                    <div>
+                      <p className="font-semibold text-gray-800">{apt.patientName}</p>
+                      <p className="text-sm text-gray-600">{apt.time}</p>
+                    </div>
                     <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
                       apt.status === 'confirmed' ? 'bg-green-100 text-green-700 border border-green-200' :
                       apt.status === 'pending' ? 'bg-yellow-100 text-yellow-700 border border-yellow-200' :
+                      apt.status === 'completed' ? 'bg-blue-100 text-blue-700 border border-blue-200' :
                       'bg-gray-100 text-gray-700'
                     }`}>
                       {apt.status}
                     </span>
+                  </div>
+                  <div className="flex items-center space-x-2">
                     {apt.status === 'confirmed' && (
-                      <button
-                        onClick={() => onStartCall(apt)}
-                        className="p-2.5 bg-gradient-to-r from-cyan-600 to-blue-600 text-white rounded-xl hover:shadow-lg transition-all group"
-                        title="Start video call"
-                      >
-                        <svg className="w-5 h-5 group-hover:scale-110 transition-transform" fill="currentColor" viewBox="0 0 20 20">
-                          <path d="M2 6a2 2 0 012-2h6a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V6zM14.553 7.106A1 1 0 0014 8v4a1 1 0 00.553.894l2 1A1 1 0 0018 13V7a1 1 0 00-1.447-.894l-2 1z" />
-                        </svg>
-                      </button>
+                      <>
+                        <button
+                          onClick={() => onStartCall(apt)}
+                          className="flex-1 py-2 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-lg hover:shadow-lg transition-all font-semibold text-sm"
+                        >
+                          Start Call
+                        </button>
+                        <button
+                          onClick={() => handleCompleteAppointment(apt._id)}
+                          className="flex-1 py-2 bg-blue-50 text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-100 transition-all font-semibold text-sm"
+                        >
+                          Mark Complete
+                        </button>
+                      </>
                     )}
                   </div>
                 </div>
@@ -416,6 +495,9 @@ function StatCard({ title, value, icon, bgColor }) {
   );
 }
 
+// Keep other components (AppointmentManagement, PatientList, ScheduleView, Reports) from previous code
+// ... (they remain the same)
+
 function AppointmentManagement({ appointments, onStartCall, onUpdateStatus, onRefresh }) {
   const [filter, setFilter] = useState('all');
 
@@ -424,9 +506,15 @@ function AppointmentManagement({ appointments, onStartCall, onUpdateStatus, onRe
     return apt.status === filter;
   });
 
+  const handleCompleteAppointment = (appointmentId) => {
+    if (window.confirm('Mark this appointment as completed?')) {
+      onUpdateStatus(appointmentId, 'completed');
+    }
+  };
+
   return (
     <div>
-      <div className="flex justify-between items-center mb-6">
+      <div className="flex justify-between items-center mb-6 flex-wrap gap-4">
         <h2 className="text-3xl font-bold text-gray-800">Appointments</h2>
         <div className="flex space-x-2">
           {['all', 'pending', 'confirmed', 'completed', 'cancelled'].map(status => (
@@ -445,85 +533,71 @@ function AppointmentManagement({ appointments, onStartCall, onUpdateStatus, onRe
         </div>
       </div>
 
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
         {filteredAppointments.length === 0 ? (
-          <div className="p-12 text-center">
+          <div className="text-center py-12">
             <svg className="w-20 h-20 text-gray-300 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
             </svg>
             <p className="text-gray-500 text-lg">No appointments found</p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-gradient-to-r from-gray-50 to-gray-100">
-                <tr>
-                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">Patient</th>
-                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">Date & Time</th>
-                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">Reason</th>
-                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">Status</th>
-                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200">
-                {filteredAppointments.map(apt => (
-                  <tr key={apt._id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-6 py-4">
-                      <div className="flex items-center">
-                        <div className="w-10 h-10 bg-gradient-to-br from-cyan-500 to-blue-600 rounded-full flex items-center justify-center text-white font-bold mr-3">
-                          {apt.patientName?.charAt(0)}
-                        </div>
-                        <div className="text-sm font-medium text-gray-900">{apt.patientName}</div>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="text-sm text-gray-900">{new Date(apt.date).toLocaleDateString()}</div>
-                      <div className="text-sm text-gray-500">{apt.time}</div>
-                    </td>
-                    <td className="px-6 py-4 text-sm text-gray-900">{apt.reason || 'Regular checkup'}</td>
-                    <td className="px-6 py-4">
-                      <span className={`px-3 py-1 text-xs font-semibold rounded-full ${
-                        apt.status === 'confirmed' ? 'bg-green-100 text-green-800' :
-                        apt.status === 'completed' ? 'bg-blue-100 text-blue-800' :
-                        apt.status === 'cancelled' ? 'bg-red-100 text-red-800' :
-                        'bg-yellow-100 text-yellow-800'
-                      }`}>
-                        {apt.status}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center space-x-2">
-                        {apt.status === 'confirmed' && (
-                          <button
-                            onClick={() => onStartCall(apt)}
-                            className="text-cyan-600 hover:text-cyan-900 font-semibold text-sm hover:underline"
-                          >
-                            Start Call
-                          </button>
-                        )}
-                        {apt.status === 'pending' && (
-                          <>
-                            <button
-                              onClick={() => onUpdateStatus(apt._id, 'confirmed')}
-                              className="text-green-600 hover:text-green-900 font-semibold text-sm"
-                            >
-                              Confirm
-                            </button>
-                            <span className="text-gray-300">|</span>
-                            <button
-                              onClick={() => onUpdateStatus(apt._id, 'cancelled')}
-                              className="text-red-600 hover:text-red-900 font-semibold text-sm"
-                            >
-                              Decline
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="space-y-3">
+            {filteredAppointments.map(apt => (
+              <div key={apt._id} className="p-4 bg-gradient-to-r from-gray-50 to-white rounded-xl border border-gray-200 hover:shadow-md transition-all">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div className="flex-1 min-w-0">
+                    <p className="font-bold text-gray-800 text-lg">{apt.patientName}</p>
+                    <p className="text-sm text-gray-600">{new Date(apt.date).toLocaleDateString()} at {apt.time}</p>
+                    {apt.reason && <p className="text-xs text-gray-500 mt-1">{apt.reason}</p>}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className={`px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap ${
+                      apt.status === 'confirmed' ? 'bg-green-100 text-green-800' :
+                      apt.status === 'completed' ? 'bg-blue-100 text-blue-800' :
+                      apt.status === 'cancelled' ? 'bg-red-100 text-red-800' :
+                      'bg-yellow-100 text-yellow-800'
+                    }`}>
+                      {apt.status}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex gap-2 mt-3">
+                  {apt.status === 'confirmed' && (
+                    <>
+                      <button
+                        onClick={() => onStartCall(apt)}
+                        className="flex-1 py-2 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-lg hover:shadow-lg transition-all font-semibold text-sm"
+                      >
+                        Start Call
+                      </button>
+                      <button
+                        onClick={() => handleCompleteAppointment(apt._id)}
+                        className="flex-1 py-2 bg-blue-50 text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-100 transition-all font-semibold text-sm"
+                      >
+                        Complete
+                      </button>
+                    </>
+                  )}
+                  {apt.status === 'pending' && (
+                    <>
+                      <button
+                        onClick={() => onUpdateStatus(apt._id, 'confirmed')}
+                        className="flex-1 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition font-semibold text-sm"
+                      >
+                        Confirm
+                      </button>
+                      <button
+                        onClick={() => onUpdateStatus(apt._id, 'cancelled')}
+                        className="flex-1 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition font-semibold text-sm"
+                      >
+                        Decline
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>

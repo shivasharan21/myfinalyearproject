@@ -1,8 +1,9 @@
-// frontend/src/pages/PatientDashboard.jsx (Enhanced with Real-time Updates)
+// frontend/src/pages/PatientDashboard.jsx (With Notifications & Appointment Actions)
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import websocketService from '../services/websocket';
 import VideoCall from '../components/VideoCall';
+import NotificationSystem from '../components/NotificationSystem';
 import axios from 'axios';
 import DiabetesPrediction from '../components/DiabetesPrediction';
 import AppointmentBooking from '../components/AppointmentBooking';
@@ -15,6 +16,7 @@ function PatientDashboard() {
   const [loading, setLoading] = useState(true);
   const [activeCall, setActiveCall] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [incomingCall, setIncomingCall] = useState(null);
 
   const fetchDashboardData = useCallback(async (showRefreshing = false) => {
     try {
@@ -46,7 +48,13 @@ function PatientDashboard() {
       fetchDashboardData(true);
     };
 
+    const handleIncomingCall = (data) => {
+      console.log('📞 Incoming call from:', data.callerName);
+      setIncomingCall(data);
+    };
+
     websocketService.onAppointmentUpdated(handleAppointmentUpdate);
+    websocketService.onCallIncoming(handleIncomingCall);
 
     // Periodic refresh every 30 seconds
     const interval = setInterval(() => {
@@ -55,6 +63,7 @@ function PatientDashboard() {
 
     return () => {
       websocketService.off('appointment:updated', handleAppointmentUpdate);
+      websocketService.off('call:incoming', handleIncomingCall);
       clearInterval(interval);
     };
   }, [fetchDashboardData]);
@@ -68,27 +77,90 @@ function PatientDashboard() {
     });
   };
 
+  const answerCall = () => {
+    if (incomingCall) {
+      const appointment = appointments.find(a => a._id === incomingCall.appointmentId);
+      if (appointment) {
+        startVideoCall(appointment);
+        setIncomingCall(null);
+      }
+    }
+  };
+
+  const rejectCall = () => {
+    if (incomingCall) {
+      websocketService.rejectCall({
+        appointmentId: incomingCall.appointmentId,
+        userId: user.id
+      });
+      setIncomingCall(null);
+    }
+  };
+
+  const cancelAppointment = async (appointmentId) => {
+    if (window.confirm('Are you sure you want to cancel this appointment?')) {
+      try {
+        await axios.patch(`${API_URL}/appointments/${appointmentId}`, { status: 'cancelled' });
+        fetchDashboardData(true);
+      } catch (error) {
+        console.error('Failed to cancel appointment:', error);
+        alert('Failed to cancel appointment');
+      }
+    }
+  };
+
   const renderContent = () => {
     switch (activeTab) {
       case 'overview':
-        return <Overview stats={stats} appointments={appointments} onStartCall={startVideoCall} onRefresh={() => fetchDashboardData(true)} />;
+        return <Overview stats={stats} appointments={appointments} onStartCall={startVideoCall} onCancel={cancelAppointment} onRefresh={() => fetchDashboardData(true)} />;
       case 'diabetes':
         return <DiabetesPrediction />;
       case 'appointments':
         return <AppointmentBooking onBookingComplete={() => fetchDashboardData(true)} />;
       case 'history':
-        return <AppointmentHistory appointments={appointments} onStartCall={startVideoCall} onRefresh={() => fetchDashboardData(true)} />;
+        return <AppointmentHistory appointments={appointments} onStartCall={startVideoCall} onCancel={cancelAppointment} onRefresh={() => fetchDashboardData(true)} />;
       case 'health':
         return <HealthRecords />;
       case 'prescriptions':
         return <Prescriptions />;
       default:
-        return <Overview stats={stats} appointments={appointments} onStartCall={startVideoCall} onRefresh={() => fetchDashboardData(true)} />;
+        return <Overview stats={stats} appointments={appointments} onStartCall={startVideoCall} onCancel={cancelAppointment} onRefresh={() => fetchDashboardData(true)} />;
     }
   };
 
   return (
     <>
+      {/* Incoming Call Modal */}
+      {incomingCall && (
+        <div className="fixed inset-0 bg-black/75 z-[100] flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl animate-bounce-in">
+            <div className="text-center">
+              <div className="w-24 h-24 bg-gradient-to-br from-green-500 to-emerald-600 rounded-full flex items-center justify-center mx-auto mb-6 animate-pulse">
+                <svg className="w-12 h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                </svg>
+              </div>
+              <h3 className="text-2xl font-bold text-gray-900 mb-2">Incoming Call</h3>
+              <p className="text-lg text-gray-600 mb-8">{incomingCall.callerName} is calling...</p>
+              <div className="flex gap-4">
+                <button
+                  onClick={rejectCall}
+                  className="flex-1 py-4 bg-red-500 text-white rounded-xl font-bold hover:bg-red-600 transition-all"
+                >
+                  Decline
+                </button>
+                <button
+                  onClick={answerCall}
+                  className="flex-1 py-4 bg-green-500 text-white rounded-xl font-bold hover:bg-green-600 transition-all"
+                >
+                  Answer
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {activeCall && (
         <VideoCall
           appointmentId={activeCall.appointmentId}
@@ -127,10 +199,11 @@ function PatientDashboard() {
                 <div className="w-12 h-12 bg-gradient-to-br from-cyan-600 to-blue-600 rounded-full flex items-center justify-center text-white font-bold text-lg flex-shrink-0 shadow-md">
                   {user?.name?.charAt(0)}
                 </div>
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <p className="font-semibold text-gray-800 truncate">{user?.name}</p>
                   <p className="text-xs text-gray-600 truncate">{user?.email}</p>
                 </div>
+                <NotificationSystem userId={user?.id} userRole="patient" />
               </div>
             </div>
 
@@ -215,6 +288,18 @@ function PatientDashboard() {
           </div>
         </div>
       </div>
+
+      <style>{`
+        @keyframes bounce-in {
+          0% { transform: scale(0.3); opacity: 0; }
+          50% { transform: scale(1.05); }
+          70% { transform: scale(0.9); }
+          100% { transform: scale(1); opacity: 1; }
+        }
+        .animate-bounce-in {
+          animation: bounce-in 0.5s ease-out;
+        }
+      `}</style>
     </>
   );
 }
@@ -251,7 +336,7 @@ function NavButton({ icon, label, active, onClick, badge, count }) {
   );
 }
 
-function Overview({ stats, appointments, onStartCall, onRefresh }) {
+function Overview({ stats, appointments, onStartCall, onCancel, onRefresh }) {
   const upcomingAppointments = appointments
     .filter(apt => new Date(apt.date) >= new Date() && apt.status !== 'cancelled')
     .slice(0, 3);
@@ -315,7 +400,7 @@ function Overview({ stats, appointments, onStartCall, onRefresh }) {
           ) : (
             <div className="space-y-3">
               {upcomingAppointments.map(apt => (
-                <AppointmentCard key={apt._id} apt={apt} onStartCall={onStartCall} />
+                <AppointmentCard key={apt._id} apt={apt} onStartCall={onStartCall} onCancel={onCancel} />
               ))}
             </div>
           )}
@@ -328,6 +413,52 @@ function Overview({ stats, appointments, onStartCall, onRefresh }) {
       {/* Medicine Reminder */}
       <div className="mt-6">
         <MedicineReminder />
+      </div>
+    </div>
+  );
+}
+
+function AppointmentCard({ apt, onStartCall, onCancel }) {
+  const canCancel = apt.status === 'pending' || apt.status === 'confirmed';
+
+  return (
+    <div className="p-4 bg-gradient-to-r from-gray-50 to-white rounded-xl border border-gray-200 hover:shadow-md transition-all">
+      <div className="flex items-start justify-between mb-3">
+        <div className="flex-1">
+          <p className="font-semibold text-gray-800 mb-1">{apt.doctorName}</p>
+          <p className="text-sm text-gray-600 flex items-center">
+            <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
+            {new Date(apt.date).toLocaleDateString()} • {apt.time}
+          </p>
+        </div>
+        <span className={`px-3 py-1 rounded-full text-xs font-semibold border ${
+          apt.status === 'confirmed' ? 'bg-green-100 text-green-700 border-green-200' :
+          apt.status === 'pending' ? 'bg-yellow-100 text-yellow-700 border-yellow-200' :
+          apt.status === 'completed' ? 'bg-blue-100 text-blue-700 border-blue-200' :
+          'bg-gray-100 text-gray-700 border-gray-200'
+        }`}>
+          {apt.status}
+        </span>
+      </div>
+      <div className="flex items-center space-x-2">
+        {apt.status === 'confirmed' && (
+          <button
+            onClick={() => onStartCall(apt)}
+            className="flex-1 py-2 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-lg hover:shadow-lg transition-all font-semibold text-sm"
+          >
+            Join Call
+          </button>
+        )}
+        {canCancel && (
+          <button
+            onClick={() => onCancel(apt._id)}
+            className="flex-1 py-2 bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100 transition-all font-semibold text-sm"
+          >
+            Cancel
+          </button>
+        )}
       </div>
     </div>
   );
@@ -356,49 +487,8 @@ function StatCard({ title, value, icon, bgColor, trend }) {
   );
 }
 
-function AppointmentCard({ apt, onStartCall }) {
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'confirmed': return 'bg-green-100 text-green-700 border-green-200';
-      case 'pending': return 'bg-yellow-100 text-yellow-700 border-yellow-200';
-      case 'completed': return 'bg-blue-100 text-blue-700 border-blue-200';
-      case 'cancelled': return 'bg-red-100 text-red-700 border-red-200';
-      default: return 'bg-gray-100 text-gray-700 border-gray-200';
-    }
-  };
-
-  return (
-    <div className="flex items-center justify-between p-4 bg-gradient-to-r from-gray-50 to-white rounded-xl border border-gray-200 hover:shadow-md transition-all duration-200">
-      <div className="flex-1">
-        <p className="font-semibold text-gray-800 mb-1">{apt.doctorName}</p>
-        <p className="text-sm text-gray-600 flex items-center">
-          <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-          </svg>
-          {new Date(apt.date).toLocaleDateString()} 
-          <span className="mx-2">•</span>
-          {apt.time}
-        </p>
-      </div>
-      <div className="flex items-center space-x-2">
-        <span className={`px-3 py-1 rounded-full text-xs font-semibold border ${getStatusColor(apt.status)}`}>
-          {apt.status}
-        </span>
-        {apt.status === 'confirmed' && (
-          <button
-            onClick={() => onStartCall(apt)}
-            className="p-2.5 bg-gradient-to-r from-cyan-600 to-blue-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 group"
-            title="Start video call"
-          >
-            <svg className="w-5 h-5 group-hover:scale-110 transition-transform" fill="currentColor" viewBox="0 0 20 20">
-              <path d="M2 6a2 2 0 012-2h6a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V6zM14.553 7.106A1 1 0 0014 8v4a1 1 0 00.553.894l2 1A1 1 0 0018 13V7a1 1 0 00-1.447-.894l-2 1z" />
-            </svg>
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}
+// Keep other helper components (HealthTipsCard, MedicineReminder, AppointmentHistory, etc.) the same as before
+// ... (copy from previous PatientDashboard code)
 
 function HealthTipsCard() {
   const tips = [
@@ -468,7 +558,7 @@ function MedicineReminder() {
   );
 }
 
-function AppointmentHistory({ appointments, onStartCall, onRefresh }) {
+function AppointmentHistory({ appointments, onStartCall, onCancel, onRefresh }) {
   return (
     <div>
       <div className="flex justify-between items-center mb-6">
@@ -493,57 +583,10 @@ function AppointmentHistory({ appointments, onStartCall, onRefresh }) {
             <p className="text-gray-400 text-sm">Book your first appointment to get started</p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-gradient-to-r from-gray-50 to-gray-100">
-                <tr>
-                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">Doctor</th>
-                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">Date & Time</th>
-                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">Reason</th>
-                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">Status</th>
-                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200">
-                {appointments.map(apt => (
-                  <tr key={apt._id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-6 py-4">
-                      <div className="flex items-center">
-                        <div className="w-10 h-10 bg-gradient-to-br from-cyan-500 to-blue-600 rounded-full flex items-center justify-center text-white font-bold mr-3">
-                          {apt.doctorName?.charAt(0)}
-                        </div>
-                        <div className="text-sm font-medium text-gray-900">{apt.doctorName}</div>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="text-sm text-gray-900">{new Date(apt.date).toLocaleDateString()}</div>
-                      <div className="text-sm text-gray-500">{apt.time}</div>
-                    </td>
-                    <td className="px-6 py-4 text-sm text-gray-900">{apt.reason || 'Regular checkup'}</td>
-                    <td className="px-6 py-4">
-                      <span className={`px-3 py-1 text-xs font-semibold rounded-full ${
-                        apt.status === 'confirmed' ? 'bg-green-100 text-green-800' :
-                        apt.status === 'completed' ? 'bg-blue-100 text-blue-800' :
-                        apt.status === 'cancelled' ? 'bg-red-100 text-red-800' :
-                        'bg-yellow-100 text-yellow-800'
-                      }`}>
-                        {apt.status}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4">
-                      {apt.status === 'confirmed' && (
-                        <button
-                          onClick={() => onStartCall(apt)}
-                          className="text-cyan-600 hover:text-cyan-900 font-semibold text-sm hover:underline"
-                        >
-                          Join Call
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="space-y-3 p-4">
+            {appointments.map(apt => (
+              <AppointmentCard key={apt._id} apt={apt} onStartCall={onStartCall} onCancel={onCancel} />
+            ))}
           </div>
         )}
       </div>
@@ -614,7 +657,7 @@ function Prescriptions() {
   );
 }
 
-// Icons (optimized SVG components)
+// Icons
 function HomeIcon() { return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>; }
 function BrainIcon() { return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>; }
 function CalendarIcon() { return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>; }
