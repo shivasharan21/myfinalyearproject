@@ -193,7 +193,6 @@ function DoctorDashboard() {
                   <p className="font-semibold text-gray-800 truncate">{user?.name}</p>
                   <p className="text-xs text-gray-600 truncate">{user?.specialization}</p>
                 </div>
-                <NotificationSystem userId={user?.id} userRole="doctor" />
               </div>
             </div>
 

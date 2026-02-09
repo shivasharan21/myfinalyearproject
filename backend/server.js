@@ -9,17 +9,37 @@ const http = require('http');
 const socketIO = require('socket.io');
 require('dotenv').config();
 
+// Helper function to parse CLIENT_URL (comma-separated or single value)
+const parseClientUrl = () => {
+  const clientUrl = process.env.CLIENT_URL || 'http://localhost:3000,http://localhost:5173,http://localhost:5174';
+  if (typeof clientUrl === 'string') {
+    return clientUrl.split(',').map(url => url.trim());
+  }
+  return clientUrl;
+};
+
+const allowedOrigins = parseClientUrl();
+
 const app = express();
 const server = http.createServer(app);
 const io = socketIO(server, {
   cors: {
-    origin: process.env.CLIENT_URL || 'http://localhost:3000',
-    methods: ['GET', 'POST', 'PATCH', 'DELETE']
+    origin: allowedOrigins,
+    credentials: true,
+    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
   }
 });
 
 // Middleware
-app.use(cors());
+const corsOptions = {
+  origin: allowedOrigins,
+  credentials: true,
+  methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+};
+
+app.use(cors(corsOptions));
 app.use(express.json());
 
 // MongoDB Connection (Fixed connection string)
@@ -78,7 +98,29 @@ const diabetesPredictionSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
+const heartDiseasePredictionSchema = new mongoose.Schema({
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  age: Number,
+  sex: Number,
+  chestPainType: Number,
+  restingBP: Number,
+  cholesterol: Number,
+  fastingBS: Number,
+  restingECG: Number,
+  maxHeartRate: Number,
+  exerciseAngina: Number,
+  oldpeak: Number,
+  stSlope: Number,
+  ca: Number,
+  thal: Number,
+  prediction: Number,
+  probability: Number,
+  createdAt: { type: Date, default: Date.now }
+});
+
 const DiabetesPrediction = mongoose.model('DiabetesPrediction', diabetesPredictionSchema);
+const HeartDiseasePrediction = mongoose.model('HeartDiseasePrediction', heartDiseasePredictionSchema);
+
 
 // Create default test users
 async function createDefaultUsers() {
@@ -129,7 +171,7 @@ io.on('connection', (socket) => {
     if (userId) {
       userSockets.set(userId.toString(), socket.id);
       console.log(`✓ User ${userId} online with socket ${socket.id}`);
-      
+
       // Broadcast online status
       io.emit('user:status', { userId, status: 'online' });
     }
@@ -185,21 +227,42 @@ io.on('connection', (socket) => {
   });
 
   socket.on('call:ice-candidate', (data) => {
-    const { appointmentId, candidate, senderId } = data;
-    const callData = activeCalls.get(appointmentId);
+    try {
+      const { appointmentId, candidate, senderId } = data;
 
-    if (callData) {
-      const receiverId = senderId.toString() === callData.callerId.toString() 
-        ? callData.receiverId 
-        : callData.callerId;
-      const receiverSocketId = userSockets.get(receiverId.toString());
-
-      if (receiverSocketId) {
-        io.to(receiverSocketId).emit('call:ice-candidate', {
-          appointmentId,
-          candidate
-        });
+      if (!appointmentId || !candidate || !senderId) {
+        console.warn('⚠️ Invalid ICE candidate data - missing fields:', { appointmentId: !!appointmentId, candidate: !!candidate, senderId: !!senderId });
+        return;
       }
+
+      const callData = activeCalls.get(appointmentId);
+
+      if (callData) {
+        // Determine receiver (the other party)
+        const receiverId = senderId.toString() === callData.callerId.toString()
+          ? callData.receiverId
+          : callData.callerId;
+
+        const receiverSocketId = userSockets.get(receiverId.toString());
+
+        if (receiverSocketId) {
+          io.to(receiverSocketId).emit('call:ice-candidate', {
+            appointmentId,
+            candidate: {
+              candidate: candidate.candidate || candidate,
+              sdpMLineIndex: candidate.sdpMLineIndex || 0,
+              sdpMid: candidate.sdpMid || ''
+            }
+          });
+          console.log(`✓ ICE candidate sent for appointment ${appointmentId}`);
+        } else {
+          console.log(`✗ Receiver socket not found for ICE candidate`);
+        }
+      } else {
+        console.log(`✗ No active call for ICE candidate: ${appointmentId}`);
+      }
+    } catch (error) {
+      console.error('❌ Error in call:ice-candidate:', error);
     }
   });
 
@@ -208,8 +271,8 @@ io.on('connection', (socket) => {
     const callData = activeCalls.get(appointmentId);
 
     if (callData) {
-      const otherUserId = userId.toString() === callData.callerId.toString() 
-        ? callData.receiverId 
+      const otherUserId = userId.toString() === callData.callerId.toString()
+        ? callData.receiverId
         : callData.callerId;
       const otherSocketId = userSockets.get(otherUserId.toString());
 
@@ -226,21 +289,21 @@ io.on('connection', (socket) => {
     const callData = activeCalls.get(appointmentId);
 
     if (callData) {
-      const otherUserId = userId.toString() === callData.callerId.toString() 
-        ? callData.receiverId 
+      const otherUserId = userId.toString() === callData.callerId.toString()
+        ? callData.receiverId
         : callData.callerId;
       const otherSocketId = userSockets.get(otherUserId.toString());
 
       if (otherSocketId) {
         io.to(otherSocketId).emit('call:ended', { appointmentId });
       }
-      
+
       // Also emit to the caller
       const callerSocketId = userSockets.get(callData.callerId.toString());
       if (callerSocketId && callerSocketId !== otherSocketId) {
         io.to(callerSocketId).emit('call:ended', { appointmentId });
       }
-      
+
       activeCalls.delete(appointmentId);
       console.log(`✓ Call ended for appointment ${appointmentId}`);
     }
@@ -492,7 +555,7 @@ app.patch('/api/appointments/:id', authMiddleware, async (req, res) => {
     }
 
     const appointment = await Appointment.findById(req.params.id);
-    
+
     if (!appointment) {
       return res.status(404).json({ error: 'Appointment not found' });
     }
@@ -573,6 +636,79 @@ app.post('/api/predict-diabetes', authMiddleware, async (req, res) => {
   }
 });
 
+// Heart disease prediction
+app.post('/api/predict-heart-disease', authMiddleware, async (req, res) => {
+  try {
+    const inputData = req.body;
+
+    // Validate input
+    const requiredFields = [
+      'age', 'sex', 'chestPainType', 'restingBP', 'cholesterol',
+      'fastingBS', 'restingECG', 'maxHeartRate', 'exerciseAngina',
+      'oldpeak', 'stSlope', 'ca', 'thal'
+    ];
+    
+    for (const field of requiredFields) {
+      if (inputData[field] === undefined || inputData[field] === null) {
+        return res.status(400).json({ error: `Missing field: ${field}` });
+      }
+    }
+
+    const pythonCmd = process.env.PYTHON_CMD || 'python';
+    const python = spawn(pythonCmd, ['ml_model/heart_predict.py', JSON.stringify(inputData)]);
+
+    let result = '';
+    let error = '';
+
+    python.stdout.on('data', (data) => {
+      result += data.toString();
+    });
+
+    python.stderr.on('data', (data) => {
+      error += data.toString();
+    });
+
+    python.on('close', async (code) => {
+      if (code !== 0) {
+        console.error('Python prediction error:', error);
+        return res.status(500).json({ error: 'Prediction failed', details: error });
+      }
+
+      try {
+        const prediction = JSON.parse(result);
+
+        const heartPrediction = new HeartDiseasePrediction({
+          userId: req.userId,
+          ...inputData,
+          prediction: prediction.prediction,
+          probability: prediction.probability
+        });
+
+        await heartPrediction.save();
+        res.json(prediction);
+      } catch (parseError) {
+        console.error('Parse prediction error:', parseError);
+        res.status(500).json({ error: 'Failed to parse prediction result' });
+      }
+    });
+  } catch (error) {
+    console.error('Prediction error:', error);
+    res.status(500).json({ error: 'Prediction failed', details: error.message });
+  }
+});
+
+// Get heart disease prediction history
+app.get('/api/heart-predictions', authMiddleware, async (req, res) => {
+  try {
+    const predictions = await HeartDiseasePrediction.find({ userId: req.userId })
+      .sort({ createdAt: -1 })
+      .limit(10);
+    res.json(predictions);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch predictions' });
+  }
+});
+
 // Get prediction history
 app.get('/api/predictions', authMiddleware, async (req, res) => {
   try {
@@ -589,9 +725,10 @@ app.get('/api/predictions', authMiddleware, async (req, res) => {
 app.get('/api/stats', authMiddleware, async (req, res) => {
   try {
     if (req.userRole === 'patient') {
-      const [appointmentCount, predictionCount, upcomingAppointments] = await Promise.all([
+      const [appointmentCount, diabetesPredictionCount, heartPredictionCount, upcomingAppointments] = await Promise.all([
         Appointment.countDocuments({ patientId: req.userId }),
         DiabetesPrediction.countDocuments({ userId: req.userId }),
+        HeartDiseasePrediction.countDocuments({ userId: req.userId }), // ADD THIS LINE
         Appointment.countDocuments({
           patientId: req.userId,
           status: { $in: ['pending', 'confirmed'] },
@@ -601,10 +738,13 @@ app.get('/api/stats', authMiddleware, async (req, res) => {
 
       res.json({
         totalAppointments: appointmentCount,
-        totalPredictions: predictionCount,
+        totalPredictions: diabetesPredictionCount + heartPredictionCount, // UPDATE THIS LINE
+        totalDiabetesPredictions: diabetesPredictionCount, // ADD THIS LINE
+        totalHeartPredictions: heartPredictionCount, // ADD THIS LINE
         upcomingAppointments
       });
     } else {
+      // Doctor stats remain the same
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       const tomorrow = new Date(today);

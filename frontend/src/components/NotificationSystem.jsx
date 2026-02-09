@@ -1,226 +1,286 @@
-// frontend/src/components/NotificationSystem.jsx
 import React, { useState, useEffect } from 'react';
-import websocketService from '../services/websocket';
+import { X, Bell, Phone, Calendar, Check, AlertCircle } from 'lucide-react';
 
-function NotificationSystem({ userId, userRole }) {
-  const [notifications, setNotifications] = useState([]);
-  const [showNotifications, setShowNotifications] = useState(false);
+// Notification Component
+function NotificationSystem({ notifications, onDismiss, onAction }) {
+  return (
+    <div className="fixed top-4 right-4 z-50 space-y-3 max-w-sm">
+      {notifications.map((notification) => (
+        <NotificationCard
+          key={notification.id}
+          notification={notification}
+          onDismiss={onDismiss}
+          onAction={onAction}
+        />
+      ))}
+    </div>
+  );
+}
 
-  useEffect(() => {
-    // Request notification permission
-    if ('Notification' in window && Notification.permission === 'default') {
-      Notification.requestPermission();
-    }
+function NotificationCard({ notification, onDismiss, onAction }) {
+  const [isExiting, setIsExiting] = useState(false);
 
-    // Define handlers
-    const handleAppointmentUpdate = (data) => {
-      addNotification({
-        id: Date.now(),
-        type: 'appointment',
-        title: 'Appointment Update',
-        message: getAppointmentMessage(data),
-        timestamp: new Date(),
-        read: false
-      });
-    };
+  const handleDismiss = () => {
+    setIsExiting(true);
+    setTimeout(() => onDismiss(notification.id), 300);
+  };
 
-    const handleCallIncoming = (data) => {
-      addNotification({
-        id: Date.now(),
-        type: 'call',
-        title: 'Incoming Call',
-        message: `${data.callerName} is calling you`,
-        timestamp: new Date(),
-        read: false,
-        sound: true
-      });
-      playNotificationSound();
-    };
-
-    // Listen for appointment updates
-    websocketService.onAppointmentUpdated(handleAppointmentUpdate);
-
-    // Listen for incoming calls
-    websocketService.onCallIncoming(handleCallIncoming);
-
-    return () => {
-      // Clean up listeners
-      websocketService.off('appointment:updated', handleAppointmentUpdate);
-      websocketService.off('call:incoming', handleCallIncoming);
-    };
-  }, [userRole]);
-
-  const getAppointmentMessage = (data) => {
-    switch (data.type) {
-      case 'created':
-        return userRole === 'doctor' 
-          ? `New appointment request from ${data.appointment.patientName}`
-          : 'Your appointment has been submitted for approval';
-      case 'updated':
-        if (data.appointment.status === 'confirmed') {
-          return userRole === 'patient'
-            ? 'Your appointment has been confirmed!'
-            : `Appointment with ${data.appointment.patientName} confirmed`;
-        } else if (data.appointment.status === 'cancelled') {
-          return 'Appointment has been cancelled';
-        } else if (data.appointment.status === 'completed') {
-          return 'Appointment has been completed';
-        }
-        return 'Appointment status updated';
+  const getIcon = () => {
+    switch (notification.type) {
+      case 'call':
+        return <Phone className="w-5 h-5 text-green-600" />;
+      case 'appointment':
+        return <Calendar className="w-5 h-5 text-blue-600" />;
+      case 'success':
+        return <Check className="w-5 h-5 text-green-600" />;
+      case 'error':
+        return <AlertCircle className="w-5 h-5 text-red-600" />;
       default:
-        return 'Appointment notification';
+        return <Bell className="w-5 h-5 text-cyan-600" />;
     }
   };
 
-  const addNotification = (notification) => {
-    setNotifications(prev => [notification, ...prev].slice(0, 10)); // Keep last 10
-    
-    // Show browser notification if permission granted
-    if (Notification.permission === 'granted') {
-      new Notification(notification.title, {
-        body: notification.message,
-        icon: '/favicon.ico'
-      });
+  const getBgColor = () => {
+    switch (notification.type) {
+      case 'call':
+        return 'from-green-50 to-emerald-50 border-green-200';
+      case 'appointment':
+        return 'from-blue-50 to-cyan-50 border-blue-200';
+      case 'success':
+        return 'from-green-50 to-emerald-50 border-green-200';
+      case 'error':
+        return 'from-red-50 to-pink-50 border-red-200';
+      default:
+        return 'from-cyan-50 to-blue-50 border-cyan-200';
     }
   };
-
-  const playNotificationSound = () => {
-    const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBi6Hwu7aizsHGGS56+OZUQ0OT6vj7bVmGwU7k9jyz3ksBSlyw+3bjDwIGGi56OKZUQ0OT6vj7bVmGwU7k9jyz3ksBSl3x/DdkEAKFF606+uoVRQKRp/g8r5sIQYuh8Lu2os7Bxhkuevhl1UODk+r4+21ZhsFO5PY8s95LAUpd8fw3ZBAChRetevrqFUUCkaf4PK+bCEGLofC7tqLOwcYZLnr4ZdVDg5Pq+PttWYbBTuT2PLPeSwFKXfH8N2QQAoUXrXr66hVFApGn+DyvmwhBi6Hwu7ajzwHGGS56+GXVQ4OT6vj7bVmGwU7k9jyz3ksBSl3x/DdkEAKFF616+uoVRQKRp/g8r5sIQYuh8Lu2os7Bxhkuevhl1UODk+r4+21ZhsFO5PY8s95LAUpd8fw3ZBAChRetevrqFUUCkaf4PK+bCEGLofC7tqLOwcYZLnr4ZdVDg5Pq+PttWYbBTuT2PLPeSwFKXfH8N2QQAoUXrXr66hVFApGn+DyvmwhBi6Hwu7aizsHGGS56+GXVQ4OT6vj7bVmGwU7k9jyz3ksBSl3x/DdkEAKFF616+uoVRQKRp/g8r5sIQYuh8Lu2os7Bxhkuevhl1UODk+r4+21ZhsFO5PY8s95LAUpd8fw3ZBAChRetevrqFUUCkaf4PK+bCEGLofC7tqLOwcYZLnr4ZdVDg5Pq+PttWYbBTuT2PLPeSwFKXfH8N2QQAoUXrXr66hVFApGn+DyvmwhBi6Hwu7aizsHGGS56+GXVQ4OT6vj7bVmGwU7k9jyz3ksBSl3x/DdkEAKFF616+uoVRQKRp/g8r5sIQYuh8Lu2os7Bxhkuevhl1UODk+r4+21ZhsFO5PY8s95LAUpd8fw3ZBAChRetevrqFUUCkaf4PK+bCEGLofC7tqLOwcYZLnr4ZdVDg5Pq+PttWYbBTuT2PLPeSwFKXfH8N2QQAoUXrXr66hVFApGn+DyvmwhBi6Hwu7aizsHGGS56+GXVQ4OT6vj7bVmGwU7k9jyz3ksBSl3x/DdkEAKFF616+uoVRQKRp/g8r5s');
-    audio.play().catch(e => console.log('Could not play sound:', e));
-  };
-
-  const markAsRead = (id) => {
-    setNotifications(prev =>
-      prev.map(notif =>
-        notif.id === id ? { ...notif, read: true } : notif
-      )
-    );
-  };
-
-  const markAllAsRead = () => {
-    setNotifications(prev =>
-      prev.map(notif => ({ ...notif, read: true }))
-    );
-  };
-
-  const clearAll = () => {
-    setNotifications([]);
-  };
-
-  const unreadCount = notifications.filter(n => !n.read).length;
 
   return (
-    <div className="relative">
-      {/* Notification Bell */}
-      <button
-        onClick={() => setShowNotifications(!showNotifications)}
-        className="relative p-2 text-gray-600 hover:text-gray-900 transition"
-      >
-        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
-        </svg>
-        {unreadCount > 0 && (
-          <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center animate-pulse">
-            {unreadCount > 9 ? '9+' : unreadCount}
-          </span>
-        )}
-      </button>
-
-      {/* Notification Dropdown */}
-      {showNotifications && (
-        <>
-          {/* Backdrop */}
-          <div
-            className="fixed inset-0 z-40"
-            onClick={() => setShowNotifications(false)}
-          ></div>
-
-          {/* Notification Panel */}
-          <div className="absolute right-0 mt-2 w-96 bg-white rounded-2xl shadow-2xl border border-gray-200 z-50 max-h-[600px] flex flex-col">
-            {/* Header */}
-            <div className="p-4 border-b border-gray-200 flex items-center justify-between">
-              <h3 className="text-lg font-bold text-gray-800">Notifications</h3>
-              <div className="flex items-center space-x-2">
-                {unreadCount > 0 && (
-                  <button
-                    onClick={markAllAsRead}
-                    className="text-xs text-cyan-600 hover:text-cyan-700 font-medium"
-                  >
-                    Mark all read
-                  </button>
-                )}
-                {notifications.length > 0 && (
-                  <button
-                    onClick={clearAll}
-                    className="text-xs text-red-600 hover:text-red-700 font-medium"
-                  >
-                    Clear all
-                  </button>
-                )}
-              </div>
+    <div
+      className={`bg-gradient-to-r ${getBgColor()} border-2 rounded-2xl shadow-2xl p-4 backdrop-blur-sm transition-all duration-300 ${
+        isExiting ? 'opacity-0 transform translate-x-full' : 'opacity-100 transform translate-x-0'
+      } animate-in slide-in-from-right`}
+    >
+      <div className="flex items-start space-x-3">
+        <div className="flex-shrink-0 w-10 h-10 bg-white rounded-full flex items-center justify-center shadow-sm">
+          {getIcon()}
+        </div>
+        
+        <div className="flex-1 min-w-0">
+          <p className="font-semibold text-gray-800 text-sm mb-1">
+            {notification.title}
+          </p>
+          <p className="text-gray-600 text-xs mb-2">
+            {notification.message}
+          </p>
+          
+          {notification.actions && notification.actions.length > 0 && (
+            <div className="flex space-x-2 mt-3">
+              {notification.actions.map((action, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => {
+                    onAction(notification.id, action.type);
+                    handleDismiss();
+                  }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                    action.primary
+                      ? 'bg-gradient-to-r from-cyan-600 to-blue-600 text-white hover:shadow-lg'
+                      : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'
+                  }`}
+                >
+                  {action.label}
+                </button>
+              ))}
             </div>
-
-            {/* Notification List */}
-            <div className="overflow-y-auto flex-1">
-              {notifications.length === 0 ? (
-                <div className="p-8 text-center">
-                  <svg className="w-16 h-16 text-gray-300 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
-                  </svg>
-                  <p className="text-gray-500">No notifications</p>
-                </div>
-              ) : (
-                notifications.map((notification) => (
-                  <div
-                    key={notification.id}
-                    onClick={() => markAsRead(notification.id)}
-                    className={`p-4 border-b border-gray-100 hover:bg-gray-50 cursor-pointer transition ${
-                      !notification.read ? 'bg-blue-50' : ''
-                    }`}
-                  >
-                    <div className="flex items-start space-x-3">
-                      <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${
-                        notification.type === 'call' ? 'bg-green-100' :
-                        notification.type === 'appointment' ? 'bg-blue-100' :
-                        'bg-purple-100'
-                      }`}>
-                        {notification.type === 'call' ? (
-                          <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
-                          </svg>
-                        ) : notification.type === 'appointment' ? (
-                          <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                          </svg>
-                        ) : (
-                          <svg className="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                          </svg>
-                        )}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold text-gray-800">{notification.title}</p>
-                        <p className="text-sm text-gray-600 mt-1">{notification.message}</p>
-                        <p className="text-xs text-gray-400 mt-1">
-                          {new Date(notification.timestamp).toLocaleTimeString([], { 
-                            hour: '2-digit', 
-                            minute: '2-digit' 
-                          })}
-                        </p>
-                      </div>
-                      {!notification.read && (
-                        <div className="w-2 h-2 bg-blue-600 rounded-full flex-shrink-0 mt-2"></div>
-                      )}
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        </>
+          )}
+        </div>
+        
+        <button
+          onClick={handleDismiss}
+          className="flex-shrink-0 text-gray-400 hover:text-gray-600 transition-colors"
+        >
+          <X className="w-4 h-4" />
+        </button>
+      </div>
+      
+      {notification.autoClose && (
+        <div className="mt-2 h-1 bg-gray-200 rounded-full overflow-hidden">
+          <div className="h-full bg-gradient-to-r from-cyan-600 to-blue-600 animate-progress" />
+        </div>
       )}
     </div>
   );
 }
 
-export default NotificationSystem;
+// Browser Notification Helper
+const requestNotificationPermission = async () => {
+  if ('Notification' in window && Notification.permission === 'default') {
+    await Notification.requestPermission();
+  }
+};
+
+const showBrowserNotification = (title, options) => {
+  if ('Notification' in window && Notification.permission === 'granted') {
+    new Notification(title, {
+      icon: '/favicon.ico',
+      badge: '/favicon.ico',
+      ...options
+    });
+  }
+};
+
+// Demo Component
+export default function NotificationDemo() {
+  const [notifications, setNotifications] = useState([]);
+
+  useEffect(() => {
+    requestNotificationPermission();
+  }, []);
+
+  const addNotification = (notification) => {
+    const id = Date.now();
+    setNotifications((prev) => [
+      ...prev,
+      { id, ...notification }
+    ]);
+
+    // Show browser notification for important types
+    if (['call', 'appointment'].includes(notification.type)) {
+      showBrowserNotification(notification.title, {
+        body: notification.message,
+        tag: notification.type,
+        requireInteraction: notification.type === 'call'
+      });
+    }
+
+    // Auto-dismiss after 5 seconds if autoClose is true
+    if (notification.autoClose) {
+      setTimeout(() => {
+        dismissNotification(id);
+      }, 5000);
+    }
+  };
+
+  const dismissNotification = (id) => {
+    setNotifications((prev) => prev.filter((n) => n.id !== id));
+  };
+
+  const handleAction = (id, actionType) => {
+    console.log('Notification action:', actionType);
+    // Handle the action based on type
+  };
+
+  // Demo notifications
+  const demoNotifications = [
+    {
+      type: 'call',
+      title: 'Incoming Video Call',
+      message: 'Dr. Sarah Johnson is calling you',
+      actions: [
+        { label: 'Accept', type: 'accept', primary: true },
+        { label: 'Decline', type: 'decline' }
+      ]
+    },
+    {
+      type: 'appointment',
+      title: 'Appointment Confirmed',
+      message: 'Your appointment with Dr. Johnson has been confirmed for tomorrow at 2:00 PM',
+      autoClose: true
+    },
+    {
+      type: 'success',
+      title: 'Appointment Completed',
+      message: 'Your consultation has been marked as complete',
+      autoClose: true
+    },
+    {
+      type: 'info',
+      title: 'New Message',
+      message: 'You have a new message from Dr. Johnson',
+      autoClose: true
+    },
+    {
+      type: 'error',
+      title: 'Connection Error',
+      message: 'Failed to connect to video call. Please try again.',
+      autoClose: true
+    }
+  ];
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-gray-100 p-8">
+      <div className="max-w-4xl mx-auto">
+        <div className="bg-white rounded-2xl shadow-lg p-8 mb-8">
+          <h1 className="text-3xl font-bold text-gray-800 mb-2">
+            Notification System Demo
+          </h1>
+          <p className="text-gray-600 mb-6">
+            Click the buttons below to test different notification types
+          </p>
+
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+            {demoNotifications.map((notification, idx) => (
+              <button
+                key={idx}
+                onClick={() => addNotification(notification)}
+                className="px-4 py-3 bg-gradient-to-r from-cyan-600 to-blue-600 text-white rounded-xl font-semibold hover:shadow-lg transition-all text-sm"
+              >
+                Show {notification.type}
+              </button>
+            ))}
+          </div>
+
+          <div className="mt-8 p-4 bg-blue-50 border border-blue-200 rounded-xl">
+            <h3 className="font-semibold text-blue-900 mb-2 flex items-center">
+              <Bell className="w-4 h-4 mr-2" />
+              How to Use
+            </h3>
+            <ul className="text-sm text-blue-800 space-y-1">
+              <li>• Import the NotificationSystem component</li>
+              <li>• Manage notifications state in your app</li>
+              <li>• Call addNotification() to show new notifications</li>
+              <li>• Handle actions through onAction callback</li>
+              <li>• Browser notifications work automatically for important types</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <NotificationSystem
+        notifications={notifications}
+        onDismiss={dismissNotification}
+        onAction={handleAction}
+      />
+
+      <style>{`
+        @keyframes progress {
+          from {
+            width: 0%;
+          }
+          to {
+            width: 100%;
+          }
+        }
+        .animate-progress {
+          animation: progress 5s linear;
+        }
+        @keyframes slide-in-from-right {
+          from {
+            transform: translateX(100%);
+            opacity: 0;
+          }
+          to {
+            transform: translateX(0);
+            opacity: 1;
+          }
+        }
+        .animate-in {
+          animation: slide-in-from-right 0.3s ease-out;
+        }
+      `}</style>
+    </div>
+  );
+}
+
+export { NotificationSystem, requestNotificationPermission, showBrowserNotification };
