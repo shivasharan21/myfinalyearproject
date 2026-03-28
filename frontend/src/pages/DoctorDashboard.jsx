@@ -1,12 +1,9 @@
 // frontend/src/pages/DoctorDashboard.jsx
-// Only the changed sections are shown below — drop this file in wholesale.
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import websocketService from '../services/websocket';
 import VideoCall from '../components/VideoCall';
-import axios from 'axios';
-
-// ─── Inline notification system (same shape as PatientDashboard) ──────────────
+import apiClient from '../services/apiClient'; // FIX: was raw axios
 
 function NotificationSystem({ notifications, onDismiss, onAction }) {
   return (
@@ -21,17 +18,9 @@ function NotificationSystem({ notifications, onDismiss, onAction }) {
 function NotificationCard({ notification, onDismiss, onAction }) {
   const [isExiting, setIsExiting] = useState(false);
   const handleDismiss = () => { setIsExiting(true); setTimeout(() => onDismiss(notification.id), 300); };
-
-  const bgMap = {
-    call: 'from-green-50 to-emerald-50 border-green-200',
-    appointment: 'from-blue-50 to-cyan-50 border-blue-200',
-    success: 'from-green-50 to-emerald-50 border-green-200',
-    error: 'from-red-50 to-pink-50 border-red-200',
-  };
-
+  const bgMap = { call: 'from-green-50 to-emerald-50 border-green-200', appointment: 'from-blue-50 to-cyan-50 border-blue-200', success: 'from-green-50 to-emerald-50 border-green-200', error: 'from-red-50 to-pink-50 border-red-200' };
   return (
-    <div className={`bg-gradient-to-r ${bgMap[notification.type] || 'from-cyan-50 to-blue-50 border-cyan-200'} border-2 rounded-2xl shadow-2xl p-4 transition-all duration-300 ${isExiting ? 'opacity-0 translate-x-full' : 'opacity-100 translate-x-0'}`}
-      style={{ animation: 'slideIn 0.3s ease-out' }}>
+    <div className={`bg-gradient-to-r ${bgMap[notification.type] || 'from-cyan-50 to-blue-50 border-cyan-200'} border-2 rounded-2xl shadow-2xl p-4 transition-all duration-300 ${isExiting ? 'opacity-0 translate-x-full' : 'opacity-100 translate-x-0'}`} style={{ animation: 'slideIn 0.3s ease-out' }}>
       <div className="flex items-start space-x-3">
         <div className="flex-1 min-w-0">
           <p className="font-semibold text-gray-800 text-sm mb-1">{notification.title}</p>
@@ -55,10 +44,8 @@ function NotificationCard({ notification, onDismiss, onAction }) {
   );
 }
 
-// ─── Main dashboard ───────────────────────────────────────────────────────────
-
 function DoctorDashboard() {
-  const { user, logout, API_URL, wsConnected } = useAuth();
+  const { user, logout, wsConnected } = useAuth();
   const [activeTab, setActiveTab] = useState('overview');
   const [stats, setStats] = useState(null);
   const [appointments, setAppointments] = useState([]);
@@ -66,7 +53,6 @@ function DoctorDashboard() {
   const [activeCall, setActiveCall] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [incomingCall, setIncomingCall] = useState(null);
-  // FIX: add notification state — previously imported but never wired up
   const [notifications, setNotifications] = useState([]);
 
   const addNotification = useCallback((notification) => {
@@ -82,20 +68,21 @@ function DoctorDashboard() {
   }, []);
 
   const handleNotificationAction = useCallback((id, actionType, data) => {
-    if (actionType === 'answer' && data?.appointment) {
-      startVideoCall(data.appointment);
-      setIncomingCall(null);
-    } else if (actionType === 'decline') {
+    if (actionType === 'answer' && data?.callData) {
+      setIncomingCall(data.callData);
+    } else if (actionType === 'decline' && data?.callData) {
+      websocketService.emit('call:reject', { appointmentId: data.callData.appointmentId, userId: user?.id });
       setIncomingCall(null);
     }
-  }, []);
+  }, [user?.id]);
 
+  // FIX: use apiClient instead of raw axios
   const fetchDashboardData = useCallback(async (showRefreshing = false) => {
     try {
       if (showRefreshing) setRefreshing(true);
       const [statsRes, appointmentsRes] = await Promise.all([
-        axios.get(`${API_URL}/stats`),
-        axios.get(`${API_URL}/appointments`),
+        apiClient.get('/stats'),
+        apiClient.get('/appointments'),
       ]);
       setStats(statsRes.data);
       setAppointments(appointmentsRes.data);
@@ -105,42 +92,30 @@ function DoctorDashboard() {
       setLoading(false);
       if (showRefreshing) setTimeout(() => setRefreshing(false), 500);
     }
-  }, [API_URL]);
+  }, []);
 
   useEffect(() => {
     fetchDashboardData();
 
-    const handleAppointmentUpdate = (data) => {
+    const handleAppointmentUpdate = () => {
       fetchDashboardData(true);
-      // FIX: actually show the notification instead of just logging
-      addNotification({
-        type: 'appointment',
-        title: 'Appointment Updated',
-        message: `Appointment ${data.appointment?.status || 'updated'}`,
-        autoClose: true,
-      });
+      addNotification({ type: 'appointment', title: 'Appointment Updated', message: 'An appointment was updated', autoClose: true });
     };
 
     const handleNewAppointment = (data) => {
       fetchDashboardData(true);
-      addNotification({
-        type: 'appointment',
-        title: 'New Appointment Request',
-        message: `${data.appointment?.patientName} requested an appointment`,
-        autoClose: true,
-      });
+      addNotification({ type: 'appointment', title: 'New Appointment Request', message: `${data.appointment?.patientName || 'A patient'} requested an appointment`, autoClose: true });
     };
 
     const handleIncomingCall = (data) => {
       setIncomingCall(data);
-      // Also show a persistent notification
       addNotification({
         type: 'call',
         title: 'Incoming Video Call',
         message: `${data.callerName} is calling`,
         actions: [
-          { label: 'Answer', type: 'answer', primary: true, data: { callData: data } },
-          { label: 'Decline', type: 'decline' },
+          { label: 'Answer',  type: 'answer',  primary: true, data: { callData: data } },
+          { label: 'Decline', type: 'decline',               data: { callData: data } },
         ],
       });
     };
@@ -162,33 +137,37 @@ function DoctorDashboard() {
   const startVideoCall = (appointment) => {
     setActiveCall({
       appointmentId: appointment._id,
-      otherUserId: appointment.patientId?._id || appointment.patientId,
+      otherUserId:   appointment.patientId?._id || appointment.patientId,
       otherUserName: appointment.patientName,
       isDoctor: true,
     });
   };
 
   const answerCall = () => {
-    if (incomingCall) {
-      const appointment = appointments.find((a) => a._id === incomingCall.appointmentId);
-      if (appointment) { startVideoCall(appointment); setIncomingCall(null); }
+    if (!incomingCall) return;
+    const appointment = appointments.find((a) => a._id === incomingCall.appointmentId);
+    if (appointment) {
+      startVideoCall(appointment);
+    } else {
+      setActiveCall({ appointmentId: incomingCall.appointmentId, otherUserId: incomingCall.callerId, otherUserName: incomingCall.callerName, isDoctor: true });
     }
+    setIncomingCall(null);
   };
 
   const rejectCall = () => {
     if (incomingCall) {
-      websocketService.rejectCall({ appointmentId: incomingCall.appointmentId, userId: user.id });
+      websocketService.emit('call:reject', { appointmentId: incomingCall.appointmentId, userId: user?.id });
       setIncomingCall(null);
     }
   };
 
+  // FIX: use apiClient instead of raw axios
   const updateStatus = async (appointmentId, status) => {
     try {
-      await axios.patch(`${API_URL}/appointments/${appointmentId}`, { status });
+      await apiClient.patch(`/appointments/${appointmentId}`, { status });
       fetchDashboardData(true);
       addNotification({ type: 'success', title: 'Status Updated', message: `Appointment ${status}`, autoClose: true });
-    } catch (error) {
-      console.error('Failed to update appointment:', error);
+    } catch {
       addNotification({ type: 'error', title: 'Error', message: 'Failed to update appointment', autoClose: true });
     }
   };
@@ -196,7 +175,7 @@ function DoctorDashboard() {
   const renderContent = () => {
     switch (activeTab) {
       case 'overview':     return <Overview stats={stats} appointments={appointments} onStartCall={startVideoCall} onUpdateStatus={updateStatus} onRefresh={() => fetchDashboardData(true)} />;
-      case 'appointments': return <AppointmentManagement appointments={appointments} onStartCall={startVideoCall} onUpdateStatus={updateStatus} onRefresh={() => fetchDashboardData(true)} />;
+      case 'appointments': return <AppointmentManagement appointments={appointments} onStartCall={startVideoCall} onUpdateStatus={updateStatus} />;
       case 'patients':     return <PatientList appointments={appointments} />;
       case 'schedule':     return <ScheduleView appointments={appointments} />;
       case 'reports':      return <Reports stats={stats} appointments={appointments} />;
@@ -206,10 +185,8 @@ function DoctorDashboard() {
 
   return (
     <>
-      {/* FIX: NotificationSystem now actually rendered */}
       <NotificationSystem notifications={notifications} onDismiss={dismissNotification} onAction={handleNotificationAction} />
 
-      {/* Incoming call modal */}
       {incomingCall && (
         <div className="fixed inset-0 bg-black/75 z-[100] flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl">
@@ -220,8 +197,8 @@ function DoctorDashboard() {
               <h3 className="text-2xl font-bold text-gray-900 mb-2">Incoming Call</h3>
               <p className="text-lg text-gray-600 mb-8">{incomingCall.callerName} is calling...</p>
               <div className="flex gap-4">
-                <button onClick={rejectCall} className="flex-1 py-4 bg-red-500 text-white rounded-xl font-bold hover:bg-red-600 transition-all">Decline</button>
-                <button onClick={answerCall} className="flex-1 py-4 bg-green-500 text-white rounded-xl font-bold hover:bg-green-600 transition-all">Answer</button>
+                <button onClick={rejectCall}  className="flex-1 py-4 bg-red-500 text-white rounded-xl font-bold hover:bg-red-600 transition-all">Decline</button>
+                <button onClick={answerCall}  className="flex-1 py-4 bg-green-500 text-white rounded-xl font-bold hover:bg-green-600 transition-all">Answer</button>
               </div>
             </div>
           </div>
@@ -239,7 +216,6 @@ function DoctorDashboard() {
       )}
 
       <div className="flex h-screen bg-gradient-to-br from-slate-50 to-gray-100">
-        {/* Sidebar */}
         <div className="w-64 bg-white shadow-xl overflow-y-auto flex flex-col border-r border-gray-200">
           <div className="p-6 border-b border-gray-200 sticky top-0 bg-white z-10">
             <h1 className="text-2xl font-bold bg-gradient-to-r from-cyan-600 to-blue-600 bg-clip-text text-transparent">Dr.AssistAI</h1>
@@ -249,7 +225,6 @@ function DoctorDashboard() {
               <span className={wsConnected ? 'text-green-600' : 'text-gray-500'}>{wsConnected ? 'Connected' : 'Offline'}</span>
             </div>
           </div>
-
           <div className="p-4 flex-1">
             <div className="mb-6">
               <div className="flex items-center space-x-3 p-4 bg-gradient-to-r from-cyan-50 to-blue-50 rounded-xl border border-cyan-100">
@@ -261,14 +236,13 @@ function DoctorDashboard() {
               </div>
             </div>
             <nav className="space-y-1">
-              <NavButton icon={<HomeIcon />}     label="Overview"     active={activeTab === 'overview'}      onClick={() => setActiveTab('overview')} />
-              <NavButton icon={<CalendarIcon />} label="Appointments" active={activeTab === 'appointments'}  onClick={() => setActiveTab('appointments')} count={appointments.filter((a) => a.status === 'pending').length} />
-              <NavButton icon={<ScheduleIcon />} label="Schedule"     active={activeTab === 'schedule'}      onClick={() => setActiveTab('schedule')} />
-              <NavButton icon={<PatientsIcon />} label="My Patients"  active={activeTab === 'patients'}      onClick={() => setActiveTab('patients')} />
-              <NavButton icon={<ReportsIcon />}  label="Reports"      active={activeTab === 'reports'}       onClick={() => setActiveTab('reports')} />
+              <NavButton icon={<HomeIcon />}     label="Overview"     active={activeTab === 'overview'}     onClick={() => setActiveTab('overview')} />
+              <NavButton icon={<CalendarIcon />} label="Appointments" active={activeTab === 'appointments'} onClick={() => setActiveTab('appointments')} count={appointments.filter((a) => a.status === 'pending').length} />
+              <NavButton icon={<ScheduleIcon />} label="Schedule"     active={activeTab === 'schedule'}     onClick={() => setActiveTab('schedule')} />
+              <NavButton icon={<PatientsIcon />} label="My Patients"  active={activeTab === 'patients'}     onClick={() => setActiveTab('patients')} />
+              <NavButton icon={<ReportsIcon />}  label="Reports"      active={activeTab === 'reports'}      onClick={() => setActiveTab('reports')} />
             </nav>
           </div>
-
           <div className="w-full p-4 border-t border-gray-200 bg-white">
             <button onClick={logout} className="w-full px-4 py-3 bg-red-50 text-red-600 rounded-xl hover:bg-red-100 transition-all flex items-center justify-center space-x-2 font-medium text-sm">
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
@@ -277,7 +251,6 @@ function DoctorDashboard() {
           </div>
         </div>
 
-        {/* Main content */}
         <div className="flex-1 overflow-auto">
           <div className="p-8">
             {loading ? (
@@ -304,8 +277,6 @@ function DoctorDashboard() {
   );
 }
 
-// ─── Nav button ───────────────────────────────────────────────────────────────
-
 function NavButton({ icon, label, active, onClick, count }) {
   return (
     <button onClick={onClick} className={`w-full text-left px-4 py-3 rounded-xl flex items-center justify-between transition-all duration-200 text-sm font-medium ${active ? 'bg-gradient-to-r from-cyan-600 to-blue-600 text-white shadow-md' : 'text-gray-700 hover:bg-gray-100'}`}>
@@ -315,12 +286,9 @@ function NavButton({ icon, label, active, onClick, count }) {
   );
 }
 
-// ─── Overview ─────────────────────────────────────────────────────────────────
-
 function Overview({ stats, appointments, onStartCall, onUpdateStatus, onRefresh }) {
   const todayAppointments = appointments.filter((apt) => new Date(apt.date).toDateString() === new Date().toDateString());
   const pendingAppointments = appointments.filter((apt) => apt.status === 'pending').slice(0, 5);
-
   return (
     <div>
       <div className="flex justify-between items-center mb-6">
@@ -330,20 +298,16 @@ function Overview({ stats, appointments, onStartCall, onUpdateStatus, onRefresh 
           <span>Refresh</span>
         </button>
       </div>
-
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-        <StatCard title="Today's Appointments" value={stats?.todayAppointments || 0} bgColor="bg-gradient-to-br from-cyan-100 to-blue-100" />
-        <StatCard title="Total Patients"        value={stats?.totalPatients || 0}       bgColor="bg-gradient-to-br from-green-100 to-emerald-100" />
-        <StatCard title="Pending Approvals"     value={pendingAppointments.length}       bgColor="bg-gradient-to-br from-yellow-100 to-amber-100" />
-        <StatCard title="Total Appointments"    value={stats?.totalAppointments || 0}   bgColor="bg-gradient-to-br from-purple-100 to-pink-100" />
+        <StatCard title="Today's Appointments" value={stats?.todayAppointments || 0} />
+        <StatCard title="Total Patients"        value={stats?.totalPatients || 0} />
+        <StatCard title="Pending Approvals"     value={pendingAppointments.length} />
+        <StatCard title="Total Appointments"    value={stats?.totalAppointments || 0} />
       </div>
-
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
           <h3 className="text-xl font-bold text-gray-800 mb-4">Today's Schedule</h3>
-          {todayAppointments.length === 0 ? (
-            <p className="text-center text-gray-500 py-8">No appointments today</p>
-          ) : (
+          {todayAppointments.length === 0 ? <p className="text-center text-gray-500 py-8">No appointments today</p> : (
             <div className="space-y-3">
               {todayAppointments.map((apt) => (
                 <div key={apt._id} className="p-4 bg-gray-50 rounded-xl border border-gray-200">
@@ -362,12 +326,9 @@ function Overview({ stats, appointments, onStartCall, onUpdateStatus, onRefresh 
             </div>
           )}
         </div>
-
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
           <h3 className="text-xl font-bold text-gray-800 mb-4">Pending Approvals</h3>
-          {pendingAppointments.length === 0 ? (
-            <p className="text-center text-gray-500 py-8">No pending appointments</p>
-          ) : (
+          {pendingAppointments.length === 0 ? <p className="text-center text-gray-500 py-8">No pending appointments</p> : (
             <div className="space-y-3">
               {pendingAppointments.map((apt) => (
                 <div key={apt._id} className="p-4 bg-yellow-50 rounded-xl border border-yellow-200">
@@ -388,7 +349,7 @@ function Overview({ stats, appointments, onStartCall, onUpdateStatus, onRefresh 
   );
 }
 
-function StatCard({ title, value, bgColor }) {
+function StatCard({ title, value }) {
   return (
     <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 hover:shadow-md transition-all">
       <p className="text-gray-600 text-sm font-medium">{title}</p>
@@ -400,7 +361,6 @@ function StatCard({ title, value, bgColor }) {
 function AppointmentManagement({ appointments, onStartCall, onUpdateStatus }) {
   const [filter, setFilter] = useState('all');
   const filtered = filter === 'all' ? appointments : appointments.filter((a) => a.status === filter);
-
   return (
     <div>
       <div className="flex justify-between items-center mb-6 flex-wrap gap-4">
@@ -459,7 +419,6 @@ function PatientList({ appointments }) {
     }
   });
   const patientList = Object.values(patientsMap);
-
   return (
     <div>
       <h2 className="text-3xl font-bold text-gray-800 mb-6">My Patients</h2>
@@ -520,10 +479,10 @@ function Reports({ stats, appointments }) {
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
           <h3 className="text-lg font-semibold text-gray-800 mb-4">Statistics</h3>
           <div className="space-y-4">
-            {[['Total Consultations', stats?.totalAppointments || 0, 'cyan-600'], ['Active Patients', stats?.totalPatients || 0, 'green-600'], ['Completed', completedApts, 'emerald-600']].map(([label, val, color]) => (
+            {[['Total Consultations', stats?.totalAppointments || 0], ['Active Patients', stats?.totalPatients || 0], ['Completed', completedApts]].map(([label, val]) => (
               <div key={label} className="flex justify-between items-center p-4 bg-gray-50 rounded-xl">
                 <span className="text-gray-700 font-medium">{label}</span>
-                <span className={`font-bold text-2xl text-${color}`}>{val}</span>
+                <span className="font-bold text-2xl text-gray-800">{val}</span>
               </div>
             ))}
           </div>
@@ -533,7 +492,6 @@ function Reports({ stats, appointments }) {
   );
 }
 
-// Icons
 function HomeIcon()     { return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>; }
 function CalendarIcon() { return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>; }
 function ScheduleIcon() { return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>; }

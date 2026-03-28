@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import websocketService from '../services/websocket';
 import VideoCall from '../components/VideoCall';
-import axios from 'axios';
+import apiClient from '../services/apiClient';          // FIX: use apiClient (has JWT interceptor)
 import DiabetesPrediction from '../components/DiabetesPrediction';
 import AppointmentBooking from '../components/AppointmentBooking';
 import { Bell, Phone, X, Calendar, Check, AlertCircle } from 'lucide-react';
@@ -30,16 +30,16 @@ function NotificationCard({ notification, onDismiss, onAction }) {
   };
 
   const iconMap = {
-    call: <Phone className="w-5 h-5 text-green-600" />,
+    call:        <Phone className="w-5 h-5 text-green-600" />,
     appointment: <Calendar className="w-5 h-5 text-blue-600" />,
-    success: <Check className="w-5 h-5 text-green-600" />,
-    error: <AlertCircle className="w-5 h-5 text-red-600" />,
+    success:     <Check className="w-5 h-5 text-green-600" />,
+    error:       <AlertCircle className="w-5 h-5 text-red-600" />,
   };
   const bgMap = {
-    call: 'from-green-50 to-emerald-50 border-green-200',
+    call:        'from-green-50 to-emerald-50 border-green-200',
     appointment: 'from-blue-50 to-cyan-50 border-blue-200',
-    success: 'from-green-50 to-emerald-50 border-green-200',
-    error: 'from-red-50 to-pink-50 border-red-200',
+    success:     'from-green-50 to-emerald-50 border-green-200',
+    error:       'from-red-50 to-pink-50 border-red-200',
   };
 
   return (
@@ -79,7 +79,7 @@ function NotificationCard({ notification, onDismiss, onAction }) {
 // ─── Main dashboard ───────────────────────────────────────────────────────────
 
 function PatientDashboard() {
-  const { user, logout, API_URL, wsConnected } = useAuth();
+  const { user, logout, wsConnected } = useAuth();
   const [activeTab, setActiveTab] = useState('overview');
   const [stats, setStats] = useState(null);
   const [appointments, setAppointments] = useState([]);
@@ -88,8 +88,6 @@ function PatientDashboard() {
   const [refreshing, setRefreshing] = useState(false);
   const [notifications, setNotifications] = useState([]);
 
-  // FIX: keep a ref so the WebSocket callback always sees the latest appointments
-  // without needing to be re-registered on every appointments state change.
   const appointmentsRef = useRef(appointments);
   useEffect(() => { appointmentsRef.current = appointments; }, [appointments]);
 
@@ -116,14 +114,15 @@ function PatientDashboard() {
     } else if (actionType === 'decline' && data?.callData) {
       websocketService.emit('call:reject', { appointmentId: data.callData.appointmentId, userId: user.id });
     }
-  }, [user?.id]);
+  }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // FIX: use apiClient instead of raw axios — apiClient attaches the JWT token
   const fetchDashboardData = useCallback(async (showRefreshing = false) => {
     try {
       if (showRefreshing) setRefreshing(true);
       const [statsRes, appointmentsRes] = await Promise.all([
-        axios.get(`${API_URL}/stats`),
-        axios.get(`${API_URL}/appointments`),
+        apiClient.get('/stats'),
+        apiClient.get('/appointments'),
       ]);
       setStats(statsRes.data);
       setAppointments(appointmentsRes.data);
@@ -134,7 +133,7 @@ function PatientDashboard() {
       setLoading(false);
       if (showRefreshing) setTimeout(() => setRefreshing(false), 500);
     }
-  }, [API_URL, addNotification]);
+  }, [addNotification]);
 
   useEffect(() => {
     if ('Notification' in window && Notification.permission === 'default') {
@@ -149,8 +148,6 @@ function PatientDashboard() {
       }
     };
 
-    // FIX: use appointmentsRef.current so this handler never has stale data,
-    // and is only registered once (no appointments in the dep array).
     const handleIncomingCall = (data) => {
       const appointment = appointmentsRef.current.find((apt) => apt._id === data.appointmentId);
       if (appointment) {
@@ -159,8 +156,8 @@ function PatientDashboard() {
           title: 'Incoming Video Call',
           message: `${data.callerName} is calling you`,
           actions: [
-            { label: 'Accept', type: 'accept', primary: true, data: { appointment, callData: data } },
-            { label: 'Decline', type: 'decline', data: { callData: data } },
+            { label: 'Accept',  type: 'accept',  primary: true, data: { appointment, callData: data } },
+            { label: 'Decline', type: 'decline',               data: { callData: data } },
           ],
         });
       }
@@ -173,15 +170,14 @@ function PatientDashboard() {
       websocketService.off('appointment:updated', handleAppointmentUpdate);
       websocketService.off('call:incoming', handleIncomingCall);
     };
-    // FIX: removed `appointments` from dep array — ref handles freshness
   }, [fetchDashboardData, addNotification]);
 
   const startVideoCall = (appointment, callData = null) => {
     setActiveCall({
       appointmentId: appointment._id,
-      otherUserId: appointment.doctorId._id || appointment.doctorId,
+      otherUserId:   appointment.doctorId?._id || appointment.doctorId,
       otherUserName: appointment.doctorName,
-      isDoctor: false,
+      isDoctor:      false,
       incomingCallData: callData,
     });
   };
@@ -189,7 +185,8 @@ function PatientDashboard() {
   const cancelAppointment = async (appointmentId) => {
     if (!window.confirm('Cancel this appointment?')) return;
     try {
-      await axios.patch(`${API_URL}/appointments/${appointmentId}`, { status: 'cancelled' });
+      // FIX: apiClient instead of raw axios
+      await apiClient.patch(`/appointments/${appointmentId}`, { status: 'cancelled' });
       fetchDashboardData(true);
       addNotification({ type: 'success', title: 'Appointment Cancelled', message: 'Cancelled successfully', autoClose: true });
     } catch {
@@ -201,13 +198,27 @@ function PatientDashboard() {
     switch (activeTab) {
       case 'overview':
         return <Overview stats={stats} appointments={appointments} onStartCall={startVideoCall} onCancelAppointment={cancelAppointment} onRefresh={() => fetchDashboardData(true)} />;
-      case 'diabetes':   return <DiabetesPrediction />;
-      case 'heart':      return <HeartDiseasePrediction />;
-      case 'appointments': return <AppointmentBooking onBookingComplete={() => { fetchDashboardData(true); addNotification({ type: 'success', title: 'Appointment Booked', message: 'Booked successfully', autoClose: true }); }} />;
-      case 'history':    return <AppointmentHistory appointments={appointments} onStartCall={startVideoCall} onCancelAppointment={cancelAppointment} onRefresh={() => fetchDashboardData(true)} />;
-      case 'health':     return <HealthRecords />;
-      case 'prescriptions': return <Prescriptions />;
-      default:           return null;
+      case 'diabetes':
+        return <DiabetesPrediction />;
+      case 'heart':
+        return <HeartDiseasePrediction />;
+      case 'appointments':
+        return (
+          <AppointmentBooking
+            onBookingComplete={() => {
+              fetchDashboardData(true);
+              addNotification({ type: 'success', title: 'Appointment Booked', message: 'Booked successfully', autoClose: true });
+            }}
+          />
+        );
+      case 'history':
+        return <AppointmentHistory appointments={appointments} onStartCall={startVideoCall} onCancelAppointment={cancelAppointment} onRefresh={() => fetchDashboardData(true)} />;
+      case 'health':
+        return <HealthRecords />;
+      case 'prescriptions':
+        return <Prescriptions />;
+      default:
+        return null;
     }
   };
 
@@ -220,7 +231,11 @@ function PatientDashboard() {
           otherUserName={activeCall.otherUserName}
           isDoctor={false}
           incomingCallData={activeCall.incomingCallData}
-          onCallEnd={() => { setActiveCall(null); fetchDashboardData(true); addNotification({ type: 'info', title: 'Call Ended', message: 'The video call has ended', autoClose: true }); }}
+          onCallEnd={() => {
+            setActiveCall(null);
+            fetchDashboardData(true);
+            addNotification({ type: 'info', title: 'Call Ended', message: 'The video call has ended', autoClose: true });
+          }}
         />
       )}
 
@@ -318,7 +333,9 @@ function NavButton({ icon, label, active, onClick, badge, count }) {
 // ─── Overview ─────────────────────────────────────────────────────────────────
 
 function Overview({ stats, appointments, onStartCall, onCancelAppointment, onRefresh }) {
-  const upcomingAppointments = appointments.filter((apt) => new Date(apt.date) >= new Date() && apt.status !== 'cancelled').slice(0, 3);
+  const upcomingAppointments = appointments
+    .filter((apt) => new Date(apt.date) >= new Date() && apt.status !== 'cancelled')
+    .slice(0, 3);
 
   return (
     <div>
@@ -331,9 +348,9 @@ function Overview({ stats, appointments, onStartCall, onCancelAppointment, onRef
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-        <StatCard title="Total Appointments" value={stats?.totalAppointments || 0} icon={<CalendarIcon />} bgColor="bg-gradient-to-br from-cyan-100 to-blue-100" />
-        <StatCard title="Upcoming" value={stats?.upcomingAppointments || 0} icon={<HistoryIcon />} bgColor="bg-gradient-to-br from-green-100 to-emerald-100" />
-        <StatCard title="Health Checks" value={stats?.totalPredictions || 0} icon={<HeartIcon />} bgColor="bg-gradient-to-br from-purple-100 to-pink-100" />
+        <StatCard title="Total Appointments" value={stats?.totalAppointments || 0}   icon={<CalendarIcon />} bgColor="bg-gradient-to-br from-cyan-100 to-blue-100" />
+        <StatCard title="Upcoming"           value={stats?.upcomingAppointments || 0} icon={<HistoryIcon />}  bgColor="bg-gradient-to-br from-green-100 to-emerald-100" />
+        <StatCard title="Health Checks"      value={stats?.totalPredictions || 0}     icon={<HeartIcon />}    bgColor="bg-gradient-to-br from-purple-100 to-pink-100" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -349,14 +366,18 @@ function Overview({ stats, appointments, onStartCall, onCancelAppointment, onRef
             </div>
           ) : (
             <div className="space-y-3">
-              {upcomingAppointments.map((apt) => <AppointmentCard key={apt._id} apt={apt} onStartCall={onStartCall} onCancel={onCancelAppointment} />)}
+              {upcomingAppointments.map((apt) => (
+                <AppointmentCard key={apt._id} apt={apt} onStartCall={onStartCall} onCancel={onCancelAppointment} />
+              ))}
             </div>
           )}
         </div>
         <HealthTipsCard />
       </div>
 
-      <div className="mt-6"><MedicineReminder /></div>
+      <div className="mt-6">
+        <MedicineReminder />
+      </div>
     </div>
   );
 }
@@ -376,7 +397,12 @@ function StatCard({ title, value, icon, bgColor }) {
 }
 
 function AppointmentCard({ apt, onStartCall, onCancel }) {
-  const statusColor = { confirmed: 'bg-green-100 text-green-700 border-green-200', pending: 'bg-yellow-100 text-yellow-700 border-yellow-200', completed: 'bg-blue-100 text-blue-700 border-blue-200', cancelled: 'bg-red-100 text-red-700 border-red-200' };
+  const statusColor = {
+    confirmed: 'bg-green-100 text-green-700 border-green-200',
+    pending:   'bg-yellow-100 text-yellow-700 border-yellow-200',
+    completed: 'bg-blue-100 text-blue-700 border-blue-200',
+    cancelled: 'bg-red-100 text-red-700 border-red-200',
+  };
   return (
     <div className="p-4 bg-gradient-to-r from-gray-50 to-white rounded-xl border border-gray-200 hover:shadow-md transition-all">
       <div className="flex items-start justify-between mb-3">
@@ -406,10 +432,10 @@ function AppointmentCard({ apt, onStartCall, onCancel }) {
 
 function HealthTipsCard() {
   const tips = [
-    { icon: '💧', text: 'Drink at least 8 glasses of water daily', color: 'from-blue-50 to-cyan-50 border-blue-100' },
-    { icon: '🏃', text: 'Exercise for 30 minutes every day', color: 'from-green-50 to-emerald-50 border-green-100' },
-    { icon: '😴', text: 'Get 7-9 hours of quality sleep', color: 'from-purple-50 to-pink-50 border-purple-100' },
-    { icon: '🥗', text: 'Eat a balanced diet with fruits and vegetables', color: 'from-orange-50 to-amber-50 border-orange-100' },
+    { icon: '💧', text: 'Drink at least 8 glasses of water daily',           color: 'from-blue-50 to-cyan-50 border-blue-100' },
+    { icon: '🏃', text: 'Exercise for 30 minutes every day',                  color: 'from-green-50 to-emerald-50 border-green-100' },
+    { icon: '😴', text: 'Get 7-9 hours of quality sleep',                     color: 'from-purple-50 to-pink-50 border-purple-100' },
+    { icon: '🥗', text: 'Eat a balanced diet with fruits and vegetables',     color: 'from-orange-50 to-amber-50 border-orange-100' },
   ];
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
@@ -426,25 +452,28 @@ function HealthTipsCard() {
   );
 }
 
-// ─── FIX: MedicineReminder fetches from /api/reminders/today ─────────────────
+// ─── MedicineReminder — FIX: use apiClient ────────────────────────────────────
 
 function MedicineReminder() {
-  const { API_URL } = useAuth();
   const [reminders, setReminders] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    axios.get(`${API_URL}/reminders/today`)
+    // FIX: was axios.get(`${API_URL}/reminders/today`) — no token attached.
+    // apiClient already has baseURL + JWT interceptor.
+    apiClient.get('/reminders/today')
       .then((res) => setReminders(res.data))
       .catch(() => setReminders([]))
       .finally(() => setLoading(false));
-  }, [API_URL]);
+  }, []);
 
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
       <h3 className="text-xl font-bold text-gray-800 mb-4">Medicine Reminders</h3>
       {loading ? (
-        <div className="flex justify-center py-4"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-cyan-600"></div></div>
+        <div className="flex justify-center py-4">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-cyan-600"></div>
+        </div>
       ) : reminders.length === 0 ? (
         <p className="text-gray-500 text-sm text-center py-4">No reminders for today.</p>
       ) : (
@@ -452,7 +481,7 @@ function MedicineReminder() {
           {reminders.map((r) => (
             <div key={r._id} className="p-4 bg-gradient-to-r from-blue-50 to-cyan-50 rounded-xl border border-blue-100">
               <p className="font-semibold text-gray-800">{r.medicineName} — {r.dosage}</p>
-              <p className="text-sm text-gray-600 mt-1">Times: {r.times.join(', ')}</p>
+              <p className="text-sm text-gray-600 mt-1">Times: {r.times?.join(', ')}</p>
               {r.instructions && <p className="text-xs text-gray-500 mt-1">{r.instructions}</p>}
             </div>
           ))}
@@ -462,25 +491,26 @@ function MedicineReminder() {
   );
 }
 
-// ─── FIX: HealthRecords fetches from /api/health-records ─────────────────────
+// ─── HealthRecords — FIX: use apiClient ──────────────────────────────────────
 
 function HealthRecords() {
-  const { API_URL } = useAuth();
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    axios.get(`${API_URL}/health-records`)
+    apiClient.get('/health-records')
       .then((res) => setRecords(res.data.records || []))
       .catch(() => setRecords([]))
       .finally(() => setLoading(false));
-  }, [API_URL]);
+  }, []);
 
   return (
     <div>
       <h2 className="text-3xl font-bold text-gray-800 mb-6">Health Records</h2>
       {loading ? (
-        <div className="flex justify-center py-12"><div className="animate-spin rounded-full h-12 w-12 border-b-4 border-cyan-600"></div></div>
+        <div className="flex justify-center py-12">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-4 border-cyan-600"></div>
+        </div>
       ) : records.length === 0 ? (
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-12 text-center">
           <svg className="w-16 h-16 text-gray-300 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
@@ -515,23 +545,22 @@ function HealthRecords() {
   );
 }
 
-// ─── FIX: Prescriptions fetches from /api/prescriptions ──────────────────────
+// ─── Prescriptions — FIX: use apiClient ──────────────────────────────────────
 
 function Prescriptions() {
-  const { API_URL } = useAuth();
   const [prescriptions, setPrescriptions] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    axios.get(`${API_URL}/prescriptions`)
+    apiClient.get('/prescriptions')
       .then((res) => setPrescriptions(res.data.prescriptions || []))
       .catch(() => setPrescriptions([]))
       .finally(() => setLoading(false));
-  }, [API_URL]);
+  }, []);
 
   const requestRefill = async (id) => {
     try {
-      await axios.post(`${API_URL}/prescriptions/${id}/refill`);
+      await apiClient.post(`/prescriptions/${id}/refill`);
       alert('Refill request sent to your doctor.');
     } catch {
       alert('Failed to send refill request.');
@@ -542,7 +571,9 @@ function Prescriptions() {
     <div>
       <h2 className="text-3xl font-bold text-gray-800 mb-6">Prescriptions</h2>
       {loading ? (
-        <div className="flex justify-center py-12"><div className="animate-spin rounded-full h-12 w-12 border-b-4 border-cyan-600"></div></div>
+        <div className="flex justify-center py-12">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-4 border-cyan-600"></div>
+        </div>
       ) : prescriptions.length === 0 ? (
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-12 text-center">
           <svg className="w-16 h-16 text-gray-300 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
@@ -569,13 +600,11 @@ function Prescriptions() {
                 ))}
               </div>
               {rx.advice && <p className="text-sm text-gray-600 italic mb-3">Advice: {rx.advice}</p>}
-              <div className="flex space-x-2">
-                {rx.status === 'active' && (
-                  <button onClick={() => requestRefill(rx._id)} className="px-4 py-2 bg-cyan-600 text-white rounded-xl hover:bg-cyan-700 transition text-sm font-semibold">
-                    Request Refill
-                  </button>
-                )}
-              </div>
+              {rx.status === 'active' && (
+                <button onClick={() => requestRefill(rx._id)} className="px-4 py-2 bg-cyan-600 text-white rounded-xl hover:bg-cyan-700 transition text-sm font-semibold">
+                  Request Refill
+                </button>
+              )}
             </div>
           ))}
         </div>
@@ -621,7 +650,10 @@ function AppointmentHistory({ appointments, onStartCall, onCancelAppointment, on
                         <span className="text-sm font-medium text-gray-900">{apt.doctorName}</span>
                       </div>
                     </td>
-                    <td className="px-6 py-4"><div className="text-sm text-gray-900">{new Date(apt.date).toLocaleDateString()}</div><div className="text-sm text-gray-500">{apt.time}</div></td>
+                    <td className="px-6 py-4">
+                      <div className="text-sm text-gray-900">{new Date(apt.date).toLocaleDateString()}</div>
+                      <div className="text-sm text-gray-500">{apt.time}</div>
+                    </td>
                     <td className="px-6 py-4 text-sm text-gray-900">{apt.reason || 'Regular checkup'}</td>
                     <td className="px-6 py-4">
                       <span className={`px-3 py-1 text-xs font-semibold rounded-full ${apt.status === 'confirmed' ? 'bg-green-100 text-green-800' : apt.status === 'completed' ? 'bg-blue-100 text-blue-800' : apt.status === 'cancelled' ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800'}`}>{apt.status}</span>
@@ -652,12 +684,12 @@ function AppointmentHistory({ appointments, onStartCall, onCancelAppointment, on
 }
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
-function HomeIcon() { return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>; }
-function BrainIcon() { return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>; }
-function HeartCheckIcon() { return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" /></svg>; }
-function CalendarIcon() { return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>; }
-function HistoryIcon() { return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>; }
-function HeartIcon() { return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" /></svg>; }
+function HomeIcon()         { return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>; }
+function BrainIcon()        { return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>; }
+function HeartCheckIcon()   { return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" /></svg>; }
+function CalendarIcon()     { return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>; }
+function HistoryIcon()      { return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>; }
+function HeartIcon()        { return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" /></svg>; }
 function PrescriptionIcon() { return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>; }
 
 export default PatientDashboard;

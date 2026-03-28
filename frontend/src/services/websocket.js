@@ -1,12 +1,22 @@
 // frontend/src/services/websocket.js
-import { io } from 'socket.io-client'; // FIX: was `import io` — wrong for socket.io-client v4+
+import { io } from 'socket.io-client';
 
 class WebSocketService {
   constructor() {
     this.socket = null;
     this.reconnectAttempts = 0;
     this.maxReconnectAttempts = 5;
+    // Local EventEmitter for internal ws: lifecycle events
+    this._listeners = {};
   }
+
+  // ─── Internal EventEmitter (for ws: prefixed events) ─────────────────────
+
+  _emit(event, data) {
+    (this._listeners[event] || []).forEach((cb) => cb(data));
+  }
+
+  // ─── Public API ───────────────────────────────────────────────────────────
 
   connect(url = 'http://localhost:5000') {
     if (this.socket?.connected) {
@@ -27,10 +37,12 @@ class WebSocketService {
       this.socket.on('connect', () => {
         console.log('✓ WebSocket connected');
         this.reconnectAttempts = 0;
+        this._emit('ws:connected');
       });
 
       this.socket.on('disconnect', (reason) => {
         console.log('✗ WebSocket disconnected:', reason);
+        this._emit('ws:disconnected', reason);
       });
 
       this.socket.on('connect_error', (error) => {
@@ -38,15 +50,18 @@ class WebSocketService {
         console.error(`✗ WebSocket connection error (attempt ${this.reconnectAttempts}):`, error.message);
         if (this.reconnectAttempts >= this.maxReconnectAttempts) {
           console.error('Max reconnection attempts reached');
+          this._emit('ws:reconnect-failed');
         }
       });
 
       this.socket.on('reconnect', (attemptNumber) => {
         console.log(`✓ WebSocket reconnected after ${attemptNumber} attempts`);
+        this._emit('ws:reconnected');
       });
 
       this.socket.on('reconnect_failed', () => {
         console.error('Failed to reconnect to WebSocket server');
+        this._emit('ws:reconnect-failed');
       });
     } catch (error) {
       console.error('Error initializing WebSocket:', error);
@@ -60,6 +75,19 @@ class WebSocketService {
     }
   }
 
+  // FIX: cleanup() was called in AuthContext.logout() but never defined
+  cleanup() {
+    this._listeners = {};
+    if (this.socket) {
+      this.socket.removeAllListeners();
+    }
+  }
+
+  // FIX: notifyOnline() was called in AuthContext but never defined
+  notifyOnline(userId) {
+    this.emit('user:online', userId);
+  }
+
   emit(event, data) {
     if (this.socket?.connected) {
       this.socket.emit(event, data);
@@ -68,11 +96,29 @@ class WebSocketService {
     }
   }
 
+  // FIX: on() now also handles internal ws: events, not just socket.io events
   on(event, callback) {
-    if (this.socket) this.socket.on(event, callback);
+    if (event.startsWith('ws:')) {
+      this._listeners[event] = this._listeners[event] || [];
+      this._listeners[event].push(callback);
+      // Return unsubscribe function (used in AuthContext)
+      return () => this.off(event, callback);
+    }
+    if (this.socket) {
+      this.socket.on(event, callback);
+    }
+    return () => this.off(event, callback);
   }
 
   off(event, callback) {
+    if (event.startsWith('ws:')) {
+      if (callback) {
+        this._listeners[event] = (this._listeners[event] || []).filter((cb) => cb !== callback);
+      } else {
+        delete this._listeners[event];
+      }
+      return;
+    }
     if (this.socket) {
       callback ? this.socket.off(event, callback) : this.socket.off(event);
     }
@@ -82,13 +128,13 @@ class WebSocketService {
     return this.socket?.connected || false;
   }
 
-  // Appointment events
+  // ─── Appointment events ───────────────────────────────────────────────────
   notifyAppointmentCreated(appointment) { this.emit('appointment:created', appointment); }
   notifyAppointmentUpdated(appointment) { this.emit('appointment:updated', appointment); }
   onAppointmentCreated(callback) { this.on('appointment:created', callback); }
   onAppointmentUpdated(callback) { this.on('appointment:updated', callback); }
 
-  // Video call events
+  // ─── Video call events ────────────────────────────────────────────────────
   initiateCall(data) { this.emit('call:initiate', data); }
   answerCall(data) { this.emit('call:answer', data); }
   sendICECandidate(data) { this.emit('call:ice-candidate', data); }
@@ -100,7 +146,7 @@ class WebSocketService {
   onCallRejected(callback) { this.on('call:rejected', callback); }
   onCallEnded(callback) { this.on('call:ended', callback); }
 
-  // User / stats
+  // ─── User / stats ─────────────────────────────────────────────────────────
   onUserStatus(callback) { this.on('user:status', callback); }
   onStatsUpdate(callback) { this.on('stats:updated', callback); }
 }

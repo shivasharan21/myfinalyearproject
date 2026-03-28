@@ -1,16 +1,15 @@
-// frontend/src/services/api.js
+// frontend/src/services/apiClient.js
 import axios from 'axios';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
-// Create axios instance
 const apiClient = axios.create({
   baseURL: API_URL,
   timeout: 15000,
   headers: { 'Content-Type': 'application/json' }
 });
 
-// Request interceptor
+// Request interceptor — attach JWT token
 apiClient.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('token');
@@ -22,7 +21,7 @@ apiClient.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-// Response interceptor
+// Response interceptor — redirect on 401
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
@@ -34,7 +33,7 @@ apiClient.interceptors.response.use(
   }
 );
 
-// Auth API
+// ─── Auth API ────────────────────────────────────────────────────────────────
 export const authAPI = {
   login: async (email, password) => {
     try {
@@ -73,7 +72,7 @@ export const authAPI = {
   },
 };
 
-// Appointments API
+// ─── Appointments API ────────────────────────────────────────────────────────
 export const appointmentsAPI = {
   getAppointments: async (filters = {}) => {
     try {
@@ -81,15 +80,6 @@ export const appointmentsAPI = {
       return response.data;
     } catch (error) {
       throw error.response?.data || { error: 'Failed to fetch appointments' };
-    }
-  },
-
-  getAppointment: async (id) => {
-    try {
-      const response = await apiClient.get(`/appointments/${id}`);
-      return response.data;
-    } catch (error) {
-      throw error.response?.data || { error: 'Failed to fetch appointment' };
     }
   },
 
@@ -124,7 +114,7 @@ export const appointmentsAPI = {
   },
 };
 
-// Doctors API
+// ─── Doctors API ─────────────────────────────────────────────────────────────
 export const doctorsAPI = {
   getDoctors: async (filters = {}) => {
     try {
@@ -135,37 +125,17 @@ export const doctorsAPI = {
     }
   },
 
-  getDoctor: async (id) => {
-    try {
-      const response = await apiClient.get(`/doctors/${id}`);
-      return response.data;
-    } catch (error) {
-      throw error.response?.data || { error: 'Failed to fetch doctor' };
-    }
-  },
-
   getAvailableSlots: async (doctorId, date) => {
     try {
-      const response = await apiClient.get(`/doctors/${doctorId}/slots`, { 
-        params: { date } 
-      });
+      const response = await apiClient.get(`/doctors/${doctorId}/slots`, { params: { date } });
       return response.data;
     } catch (error) {
       throw error.response?.data || { error: 'Failed to fetch available slots' };
     }
   },
-
-  getDoctorPatients: async () => {
-    try {
-      const response = await apiClient.get('/doctors/patients');
-      return response.data;
-    } catch (error) {
-      throw error.response?.data || { error: 'Failed to fetch patients' };
-    }
-  },
 };
 
-// Health Records API
+// ─── Health Records API ───────────────────────────────────────────────────────
 export const healthAPI = {
   getHealthRecords: async (filters = {}) => {
     try {
@@ -173,15 +143,6 @@ export const healthAPI = {
       return response.data;
     } catch (error) {
       throw error.response?.data || { error: 'Failed to fetch health records' };
-    }
-  },
-
-  getHealthRecord: async (id) => {
-    try {
-      const response = await apiClient.get(`/health-records/${id}`);
-      return response.data;
-    } catch (error) {
-      throw error.response?.data || { error: 'Failed to fetch health record' };
     }
   },
 
@@ -202,18 +163,9 @@ export const healthAPI = {
       throw error.response?.data || { error: 'Failed to update health record' };
     }
   },
-
-  getVitalsTimeline: async (patientId) => {
-    try {
-      const response = await apiClient.get(`/health-records/vitals/${patientId}`);
-      return response.data;
-    } catch (error) {
-      throw error.response?.data || { error: 'Failed to fetch vitals' };
-    }
-  },
 };
 
-// Prescriptions API
+// ─── Prescriptions API ────────────────────────────────────────────────────────
 export const prescriptionsAPI = {
   getPrescriptions: async (filters = {}) => {
     try {
@@ -224,39 +176,12 @@ export const prescriptionsAPI = {
     }
   },
 
-  getPrescription: async (id) => {
-    try {
-      const response = await apiClient.get(`/prescriptions/${id}`);
-      return response.data;
-    } catch (error) {
-      throw error.response?.data || { error: 'Failed to fetch prescription' };
-    }
-  },
-
   createPrescription: async (prescriptionData) => {
     try {
       const response = await apiClient.post('/prescriptions', prescriptionData);
       return response.data;
     } catch (error) {
       throw error.response?.data || { error: 'Failed to create prescription' };
-    }
-  },
-
-  updatePrescription: async (id, updates) => {
-    try {
-      const response = await apiClient.put(`/prescriptions/${id}`, updates);
-      return response.data;
-    } catch (error) {
-      throw error.response?.data || { error: 'Failed to update prescription' };
-    }
-  },
-
-  dispensePrescription: async (id) => {
-    try {
-      const response = await apiClient.patch(`/prescriptions/${id}/dispense`);
-      return response.data;
-    } catch (error) {
-      throw error.response?.data || { error: 'Failed to dispense prescription' };
     }
   },
 
@@ -270,7 +195,7 @@ export const prescriptionsAPI = {
   },
 };
 
-// Predictions API
+// ─── Predictions API ──────────────────────────────────────────────────────────
 export const predictionsAPI = {
   predictDiabetes: async (data) => {
     try {
@@ -283,9 +208,7 @@ export const predictionsAPI = {
 
   getDiabetesHistory: async (limit = 10) => {
     try {
-      const response = await apiClient.get('/predictions', { 
-        params: { limit } 
-      });
+      const response = await apiClient.get('/predictions', { params: { limit } });
       return response.data;
     } catch (error) {
       throw error.response?.data || { error: 'Failed to fetch history' };
@@ -303,26 +226,15 @@ export const predictionsAPI = {
 
   getHeartHistory: async (limit = 10) => {
     try {
-      const response = await apiClient.get('/heart-predictions', { 
-        params: { limit } 
-      });
+      const response = await apiClient.get('/heart-predictions', { params: { limit } });
       return response.data;
     } catch (error) {
       throw error.response?.data || { error: 'Failed to fetch history' };
     }
   },
-
-  getPredictionSummary: async () => {
-    try {
-      const response = await apiClient.get('/predictions/summary');
-      return response.data;
-    } catch (error) {
-      throw error.response?.data || { error: 'Failed to fetch summary' };
-    }
-  },
 };
 
-// Stats API
+// ─── Stats API ────────────────────────────────────────────────────────────────
 export const statsAPI = {
   getStats: async () => {
     try {
@@ -332,18 +244,9 @@ export const statsAPI = {
       throw error.response?.data || { error: 'Failed to fetch stats' };
     }
   },
-
-  getAdminStats: async () => {
-    try {
-      const response = await apiClient.get('/stats/admin');
-      return response.data;
-    } catch (error) {
-      throw error.response?.data || { error: 'Failed to fetch admin stats' };
-    }
-  },
 };
 
-// Reminders API
+// ─── Reminders API ────────────────────────────────────────────────────────────
 export const remindersAPI = {
   getReminders: async () => {
     try {
@@ -354,21 +257,21 @@ export const remindersAPI = {
     }
   },
 
+  getTodaySchedule: async () => {
+    try {
+      const response = await apiClient.get('/reminders/today');
+      return response.data;
+    } catch (error) {
+      throw error.response?.data || { error: "Failed to fetch today's schedule" };
+    }
+  },
+
   createReminder: async (reminderData) => {
     try {
       const response = await apiClient.post('/reminders', reminderData);
       return response.data;
     } catch (error) {
       throw error.response?.data || { error: 'Failed to create reminder' };
-    }
-  },
-
-  updateReminder: async (id, updates) => {
-    try {
-      const response = await apiClient.put(`/reminders/${id}`, updates);
-      return response.data;
-    } catch (error) {
-      throw error.response?.data || { error: 'Failed to update reminder' };
     }
   },
 
@@ -389,15 +292,7 @@ export const remindersAPI = {
       throw error.response?.data || { error: 'Failed to delete reminder' };
     }
   },
-
-  getTodaySchedule: async () => {
-    try {
-      const response = await apiClient.get('/reminders/today');
-      return response.data;
-    } catch (error) {
-      throw error.response?.data || { error: 'Failed to fetch today\'s schedule' };
-    }
-  },
 };
 
-export default apiClient; a4ea9ad
+// Also export as default for legacy imports
+export default apiClient;

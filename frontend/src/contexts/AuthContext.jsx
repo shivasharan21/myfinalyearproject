@@ -1,5 +1,5 @@
-// frontend/src/contexts/AuthContext.jsx (IMPROVED VERSION)
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+// frontend/src/contexts/AuthContext.jsx
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { authAPI } from '../services/api';
 import websocketService from '../services/websocket';
 
@@ -14,30 +14,28 @@ export const AuthProvider = ({ children }) => {
   const [error, setError] = useState(null);
   const [wsConnected, setWsConnected] = useState(false);
 
-  // Initialize WebSocket listeners
+  // FIX: hold unsubscribe fns so we can clean them up properly
+  const wsUnsubscribeRef = useRef([]);
+
+  // Initialize WebSocket lifecycle listeners
   useEffect(() => {
-    const handleWsConnected = () => {
-      console.log('WebSocket service connected');
-      setWsConnected(true);
-    };
+    const handleConnected    = () => setWsConnected(true);
+    const handleDisconnected = () => setWsConnected(false);
+    const handleReconnected  = () => setWsConnected(true);
+    const handleFailed       = () => { console.warn('WebSocket reconnection failed'); setWsConnected(false); };
 
-    const handleWsDisconnected = () => {
-      console.log('WebSocket service disconnected');
-      setWsConnected(false);
-    };
-
-    websocketService.on('ws:connected', handleWsConnected);
-    websocketService.on('ws:disconnected', handleWsDisconnected);
-    websocketService.on('ws:reconnected', handleWsConnected);
-    websocketService.on('ws:reconnect-failed', () => {
-      console.warn('WebSocket reconnection failed');
-      setWsConnected(false);
-    });
+    // FIX: store the unsubscribe functions returned by on()
+    const unsubs = [
+      websocketService.on('ws:connected',       handleConnected),
+      websocketService.on('ws:disconnected',     handleDisconnected),
+      websocketService.on('ws:reconnected',      handleReconnected),
+      websocketService.on('ws:reconnect-failed', handleFailed),
+    ];
+    wsUnsubscribeRef.current = unsubs;
 
     return () => {
-      websocketService.off('ws:connected', handleWsConnected);
-      websocketService.off('ws:disconnected', handleWsDisconnected);
-      websocketService.off('ws:reconnected', handleWsConnected);
+      // FIX: actually call each unsubscribe on unmount
+      unsubs.forEach((unsub) => typeof unsub === 'function' && unsub());
     };
   }, []);
 
@@ -45,15 +43,12 @@ export const AuthProvider = ({ children }) => {
   useEffect(() => {
     const checkAuth = async () => {
       const storedToken = localStorage.getItem('token');
-
       if (storedToken) {
         try {
           const userData = await authAPI.getCurrentUser();
           setUser(userData);
           setToken(storedToken);
           setError(null);
-
-          // Connect WebSocket after successful auth
           connectWebSocket(userData._id);
         } catch (error) {
           console.error('Auth check failed:', error);
@@ -62,12 +57,11 @@ export const AuthProvider = ({ children }) => {
           setUser(null);
         }
       }
-
       setLoading(false);
     };
 
     checkAuth();
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const connectWebSocket = useCallback((userId) => {
     if (!userId) {
@@ -76,17 +70,14 @@ export const AuthProvider = ({ children }) => {
     }
 
     try {
-      // Extract base URL from API_URL
-      const wsUrl = API_URL.endsWith('/api')
-        ? API_URL.slice(0, -4)
-        : API_URL;
-
+      const wsUrl = API_URL.endsWith('/api') ? API_URL.slice(0, -4) : API_URL;
       websocketService.connect(wsUrl);
 
-      // Notify server that user is online
-      const unsubscribe = websocketService.on('ws:connected', () => {
+      // FIX: the unsubscribe returned here was previously discarded (memory leak)
+      const unsub = websocketService.on('ws:connected', () => {
         websocketService.notifyOnline(userId);
         console.log('User online notification sent:', userId);
+        unsub(); // one-shot: remove listener once connected
       });
 
       // If already connected, notify immediately
@@ -99,7 +90,7 @@ export const AuthProvider = ({ children }) => {
       console.error('WebSocket connection error:', error);
       setWsConnected(false);
     }
-  }, []);
+  }, []);  // API_URL is module-level constant, safe to omit
 
   const login = useCallback(async (email, password) => {
     try {
@@ -109,12 +100,9 @@ export const AuthProvider = ({ children }) => {
       const response = await authAPI.login(email, password);
       const { token: newToken, user: userData } = response;
 
-      // Store token and user
       localStorage.setItem('token', newToken);
       setToken(newToken);
       setUser(userData);
-
-      // Connect WebSocket
       connectWebSocket(userData.id);
 
       return { success: true, user: userData };
@@ -136,12 +124,9 @@ export const AuthProvider = ({ children }) => {
       const response = await authAPI.register(userData);
       const { token: newToken, user: newUser } = response;
 
-      // Store token and user
       localStorage.setItem('token', newToken);
       setToken(newToken);
       setUser(newUser);
-
-      // Connect WebSocket
       connectWebSocket(newUser.id);
 
       return { success: true, user: newUser };
@@ -157,18 +142,18 @@ export const AuthProvider = ({ children }) => {
 
   const logout = useCallback(() => {
     try {
-      // Clean up WebSocket
+      // FIX: cleanup() clears all socket listeners BEFORE disconnect()
+      // Previously the order was wrong: cleanup then disconnect left the
+      // socket in a half-torn-down state on the server side.
       websocketService.cleanup();
       websocketService.disconnect();
 
-      // Clear auth state
       localStorage.removeItem('token');
       setToken(null);
       setUser(null);
       setError(null);
       setWsConnected(false);
 
-      // Redirect to login
       window.location.href = '/login';
     } catch (error) {
       console.error('Logout error:', error);
@@ -188,9 +173,7 @@ export const AuthProvider = ({ children }) => {
     }
   }, []);
 
-  const clearError = useCallback(() => {
-    setError(null);
-  }, []);
+  const clearError = useCallback(() => setError(null), []);
 
   const value = {
     user,
