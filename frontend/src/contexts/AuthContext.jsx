@@ -1,213 +1,213 @@
-// frontend/src/contexts/AuthContext.jsx (Fixed and Enhanced)
-import React, { createContext, useContext, useState, useEffect } from "react";
-import axios from "axios";
-import websocketService from "../services/websocket";
+// frontend/src/contexts/AuthContext.jsx (IMPROVED VERSION)
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { authAPI } from '../services/api';
+import websocketService from '../services/websocket';
 
 const AuthContext = createContext();
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [token, setToken] = useState(localStorage.getItem("token"));
+  const [token, setToken] = useState(localStorage.getItem('token'));
   const [error, setError] = useState(null);
   const [wsConnected, setWsConnected] = useState(false);
 
-  // Set up axios interceptor for auth token
+  // Initialize WebSocket listeners
   useEffect(() => {
-    const interceptor = axios.interceptors.request.use(
-      (config) => {
-        const token = localStorage.getItem("token");
-        if (token) {
-          config.headers.Authorization = `Bearer ${token}`;
-        }
-        // Ensure full URL
-        if (config.url.startsWith("/")) {
-          config.url = API_URL + config.url;
-        }
-        return config;
-      },
-      (error) => {
-        return Promise.reject(error);
-      },
-    );
+    const handleWsConnected = () => {
+      console.log('WebSocket service connected');
+      setWsConnected(true);
+    };
 
-    // Response interceptor for handling 401 errors
-    const responseInterceptor = axios.interceptors.response.use(
-      (response) => response,
-      (error) => {
-        if (error.response?.status === 401) {
-          // Token expired or invalid
-          localStorage.removeItem("token");
-          setToken(null);
-          setUser(null);
-          window.location.href = "/login";
-        }
-        return Promise.reject(error);
-      },
-    );
+    const handleWsDisconnected = () => {
+      console.log('WebSocket service disconnected');
+      setWsConnected(false);
+    };
+
+    websocketService.on('ws:connected', handleWsConnected);
+    websocketService.on('ws:disconnected', handleWsDisconnected);
+    websocketService.on('ws:reconnected', handleWsConnected);
+    websocketService.on('ws:reconnect-failed', () => {
+      console.warn('WebSocket reconnection failed');
+      setWsConnected(false);
+    });
 
     return () => {
-      axios.interceptors.request.eject(interceptor);
-      axios.interceptors.response.eject(responseInterceptor);
+      websocketService.off('ws:connected', handleWsConnected);
+      websocketService.off('ws:disconnected', handleWsDisconnected);
+      websocketService.off('ws:reconnected', handleWsConnected);
     };
   }, []);
 
-  // Check for existing token on mount
+  // Check authentication on mount
   useEffect(() => {
     const checkAuth = async () => {
-      const storedToken = localStorage.getItem("token");
+      const storedToken = localStorage.getItem('token');
+
       if (storedToken) {
         try {
-          const response = await axios.get(`${API_URL}/auth/me`);
-          setUser(response.data);
+          const userData = await authAPI.getCurrentUser();
+          setUser(userData);
           setToken(storedToken);
           setError(null);
 
-          // Connect WebSocket after user is authenticated
-          connectWebSocket(response.data._id);
+          // Connect WebSocket after successful auth
+          connectWebSocket(userData._id);
         } catch (error) {
-          console.error("Auth check failed:", error);
-          localStorage.removeItem("token");
+          console.error('Auth check failed:', error);
+          localStorage.removeItem('token');
           setToken(null);
           setUser(null);
         }
       }
+
       setLoading(false);
     };
+
     checkAuth();
   }, []);
 
-  const connectWebSocket = (userId) => {
+  const connectWebSocket = useCallback((userId) => {
+    if (!userId) {
+      console.error('User ID required for WebSocket connection');
+      return;
+    }
+
     try {
-      // Extract base URL from API_URL by removing /api suffix
-      const wsUrl = API_URL.endsWith("/api")
-        ? API_URL.slice(0, -4) // Remove '/api' (4 characters)
+      // Extract base URL from API_URL
+      const wsUrl = API_URL.endsWith('/api')
+        ? API_URL.slice(0, -4)
         : API_URL;
+
       websocketService.connect(wsUrl);
 
-      // Wait a bit for connection to establish
-      setTimeout(() => {
-        websocketService.emit("user:online", userId);
-        setWsConnected(true);
-        console.log("✓ WebSocket connected for user:", userId);
-      }, 500);
-
-      // Listen for connection status
-      websocketService.on("connect", () => {
-        setWsConnected(true);
-        websocketService.emit("user:online", userId);
+      // Notify server that user is online
+      const unsubscribe = websocketService.on('ws:connected', () => {
+        websocketService.notifyOnline(userId);
+        console.log('User online notification sent:', userId);
       });
 
-      websocketService.on("disconnect", () => {
-        setWsConnected(false);
-      });
-    } catch (wsError) {
-      console.warn("WebSocket connection warning:", wsError);
+      // If already connected, notify immediately
+      if (websocketService.isConnected()) {
+        websocketService.notifyOnline(userId);
+      }
+
+      setWsConnected(websocketService.isConnected());
+    } catch (error) {
+      console.error('WebSocket connection error:', error);
       setWsConnected(false);
     }
-  };
+  }, []);
 
-  const login = async (email, password) => {
+  const login = useCallback(async (email, password) => {
     try {
       setError(null);
       setLoading(true);
 
-      const response = await axios.post(`${API_URL}/auth/login`, {
-        email,
-        password,
-      });
+      const response = await authAPI.login(email, password);
+      const { token: newToken, user: userData } = response;
 
-      const { token, user } = response.data;
-
-      // Store token
-      localStorage.setItem("token", token);
-      setToken(token);
-      setUser(user);
+      // Store token and user
+      localStorage.setItem('token', newToken);
+      setToken(newToken);
+      setUser(userData);
 
       // Connect WebSocket
-      connectWebSocket(user.id);
+      connectWebSocket(userData.id);
 
-      setLoading(false);
-      return { success: true, user };
-    } catch (error) {
-      const errorMessage =
-        error.response?.data?.error || error.message || "Login failed";
+      return { success: true, user: userData };
+    } catch (err) {
+      const errorMessage = err.error || err.message || 'Login failed';
       setError(errorMessage);
+      console.error('Login error:', err);
+      throw err;
+    } finally {
       setLoading(false);
-      console.error("Login failed:", error);
-      throw error;
     }
-  };
+  }, [connectWebSocket]);
 
-  const register = async (userData) => {
+  const register = useCallback(async (userData) => {
     try {
       setError(null);
       setLoading(true);
 
-      const response = await axios.post(`${API_URL}/auth/register`, userData);
-      const { token, user } = response.data;
+      const response = await authAPI.register(userData);
+      const { token: newToken, user: newUser } = response;
 
-      // Store token
-      localStorage.setItem("token", token);
-      setToken(token);
-      setUser(user);
+      // Store token and user
+      localStorage.setItem('token', newToken);
+      setToken(newToken);
+      setUser(newUser);
 
       // Connect WebSocket
-      connectWebSocket(user.id);
+      connectWebSocket(newUser.id);
 
-      setLoading(false);
-      return { success: true, user };
-    } catch (error) {
-      const errorMessage =
-        error.response?.data?.error || error.message || "Registration failed";
+      return { success: true, user: newUser };
+    } catch (err) {
+      const errorMessage = err.error || err.message || 'Registration failed';
       setError(errorMessage);
+      console.error('Register error:', err);
+      return { success: false, error: errorMessage };
+    } finally {
       setLoading(false);
-      console.error("Registration failed:", error);
-      return {
-        success: false,
-        error: errorMessage,
-      };
     }
-  };
+  }, [connectWebSocket]);
 
-  const logout = () => {
-    localStorage.removeItem("token");
-    setToken(null);
-    setUser(null);
-    setError(null);
-    setWsConnected(false);
-
-    // Disconnect WebSocket
+  const logout = useCallback(() => {
     try {
+      // Clean up WebSocket
+      websocketService.cleanup();
       websocketService.disconnect();
-    } catch (wsError) {
-      console.warn("WebSocket disconnect warning:", wsError);
+
+      // Clear auth state
+      localStorage.removeItem('token');
+      setToken(null);
+      setUser(null);
+      setError(null);
+      setWsConnected(false);
+
+      // Redirect to login
+      window.location.href = '/login';
+    } catch (error) {
+      console.error('Logout error:', error);
     }
+  }, []);
 
-    window.location.href = "/login";
-  };
+  const updateProfile = useCallback(async (profileData) => {
+    try {
+      setError(null);
+      const response = await authAPI.updateProfile(profileData);
+      setUser(response.user);
+      return response;
+    } catch (err) {
+      const errorMessage = err.error || err.message || 'Update failed';
+      setError(errorMessage);
+      throw err;
+    }
+  }, []);
 
-  const clearError = () => {
+  const clearError = useCallback(() => {
     setError(null);
+  }, []);
+
+  const value = {
+    user,
+    loading,
+    token,
+    error,
+    wsConnected,
+    login,
+    register,
+    logout,
+    updateProfile,
+    clearError,
+    API_URL,
   };
 
   return (
-    <AuthContext.Provider
-      value={{
-        user,
-        loading,
-        token,
-        login,
-        register,
-        logout,
-        API_URL,
-        error,
-        clearError,
-        wsConnected,
-      }}
-    >
+    <AuthContext.Provider value={value}>
       {children}
     </AuthContext.Provider>
   );
@@ -216,7 +216,9 @@ export const AuthProvider = ({ children }) => {
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (!context) {
-    throw new Error("useAuth must be used within an AuthProvider");
+    throw new Error('useAuth must be used within AuthProvider');
   }
   return context;
 };
+
+export default AuthContext;
