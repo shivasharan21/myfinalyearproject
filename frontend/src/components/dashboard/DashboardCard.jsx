@@ -8,7 +8,7 @@ import {
   CalendarIcon,
   UsersIcon,
   RefreshIcon,
-} from '../icons/Icons';
+} from '../icons/icons';
 
 export const DashboardCard = ({
   title,
