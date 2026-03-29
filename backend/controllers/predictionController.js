@@ -7,14 +7,18 @@ const HeartDiseasePrediction = require('../models/HeartDiseasePrediction');
 const runPythonScript = (scriptPath, inputData) =>
   new Promise((resolve, reject) => {
     const pythonCmd = process.env.PYTHON_CMD || 'python';
-    const python    = spawn(pythonCmd, [scriptPath, JSON.stringify(inputData)]);
+    const python    = spawn(pythonCmd, [scriptPath]);
     let result = '', error = '';
+
+    // Send input data via stdin
+    python.stdin.write(JSON.stringify(inputData));
+    python.stdin.end();
 
     python.stdout.on('data', (data) => { result += data.toString(); });
     python.stderr.on('data', (data) => { error  += data.toString(); });
 
     python.on('close', (code) => {
-      if (code !== 0) return reject(new Error(error));
+      if (code !== 0) return reject(new Error(error || 'Python script failed'));
       try {
         resolve(JSON.parse(result));
       } catch {

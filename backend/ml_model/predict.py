@@ -55,18 +55,18 @@ def predict(input_data):
 
 if __name__ == '__main__':
     try:
-        # Check if input data was provided
-        if len(sys.argv) < 2:
+        # Read input data from stdin
+        import sys
+        input_json = sys.stdin.read()
+        
+        if not input_json.strip():
             error_msg = {
                 'error': 'No input data provided',
-                'usage': 'python predict.py \'{"pregnancies": 2, "glucose": 120, ...}\'',
-                'note': 'This script is designed to be called by the Node.js backend'
+                'note': 'This script expects JSON data via stdin'
             }
             print(json.dumps(error_msg), file=sys.stderr)
             sys.exit(1)
         
-        # Read input data from command line argument
-        input_json = sys.argv[1]
         input_data = json.loads(input_json)
         
         # Validate required fields

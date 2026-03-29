@@ -75,7 +75,6 @@ class WebSocketService {
     }
   }
 
-  // FIX: cleanup() was called in AuthContext.logout() but never defined
   cleanup() {
     this._listeners = {};
     if (this.socket) {
@@ -83,7 +82,6 @@ class WebSocketService {
     }
   }
 
-  // FIX: notifyOnline() was called in AuthContext but never defined
   notifyOnline(userId) {
     this.emit('user:online', userId);
   }
@@ -96,12 +94,11 @@ class WebSocketService {
     }
   }
 
-  // FIX: on() now also handles internal ws: events, not just socket.io events
+  // on() handles both internal ws: events and socket.io events
   on(event, callback) {
     if (event.startsWith('ws:')) {
       this._listeners[event] = this._listeners[event] || [];
       this._listeners[event].push(callback);
-      // Return unsubscribe function (used in AuthContext)
       return () => this.off(event, callback);
     }
     if (this.socket) {
@@ -131,23 +128,45 @@ class WebSocketService {
   // ─── Appointment events ───────────────────────────────────────────────────
   notifyAppointmentCreated(appointment) { this.emit('appointment:created', appointment); }
   notifyAppointmentUpdated(appointment) { this.emit('appointment:updated', appointment); }
-  onAppointmentCreated(callback) { this.on('appointment:created', callback); }
-  onAppointmentUpdated(callback) { this.on('appointment:updated', callback); }
+  onAppointmentCreated(callback)        { this.on('appointment:created', callback); }
+  onAppointmentUpdated(callback)        { this.on('appointment:updated', callback); }
+
+  // ─── Prescription events ───────────────────────────────────────────────────
+  notifyPrescriptionCreated(prescription) { this.emit('prescription:created', prescription); }
+  notifyPrescriptionUpdated(prescription) { this.emit('prescription:updated', prescription); }
+  onPrescriptionCreated(callback)         { this.on('prescription:created', callback); }
+  onPrescriptionUpdated(callback)         { this.on('prescription:updated', callback); }
+  offPrescriptionCreated(callback)        { this.off('prescription:created', callback); }
+  offPrescriptionUpdated(callback)        { this.off('prescription:updated', callback); }
+  // FIX: added missing delete helpers
+  onPrescriptionDeleted(callback)         { this.on('prescription:deleted', callback); }
+  offPrescriptionDeleted(callback)        { this.off('prescription:deleted', callback); }
+
+  // ─── Health Record events ──────────────────────────────────────────────────
+  notifyHealthRecordCreated(record) { this.emit('health-record:created', record); }
+  notifyHealthRecordUpdated(record) { this.emit('health-record:updated', record); }
+  onHealthRecordCreated(callback)   { this.on('health-record:created', callback); }
+  onHealthRecordUpdated(callback)   { this.on('health-record:updated', callback); }
+  offHealthRecordCreated(callback)  { this.off('health-record:created', callback); }
+  offHealthRecordUpdated(callback)  { this.off('health-record:updated', callback); }
+  // FIX: added missing delete helpers
+  onHealthRecordDeleted(callback)   { this.on('health-record:deleted', callback); }
+  offHealthRecordDeleted(callback)  { this.off('health-record:deleted', callback); }
 
   // ─── Video call events ────────────────────────────────────────────────────
-  initiateCall(data) { this.emit('call:initiate', data); }
-  answerCall(data) { this.emit('call:answer', data); }
-  sendICECandidate(data) { this.emit('call:ice-candidate', data); }
-  rejectCall(data) { this.emit('call:reject', data); }
-  endCall(data) { this.emit('call:end', data); }
-  onCallIncoming(callback) { this.on('call:incoming', callback); }
-  onCallAnswered(callback) { this.on('call:answered', callback); }
-  onICECandidate(callback) { this.on('call:ice-candidate', callback); }
-  onCallRejected(callback) { this.on('call:rejected', callback); }
-  onCallEnded(callback) { this.on('call:ended', callback); }
+  initiateCall(data)        { this.emit('call:initiate', data); }
+  answerCall(data)          { this.emit('call:answer', data); }
+  sendICECandidate(data)    { this.emit('call:ice-candidate', data); }
+  rejectCall(data)          { this.emit('call:reject', data); }
+  endCall(data)             { this.emit('call:end', data); }
+  onCallIncoming(callback)  { this.on('call:incoming', callback); }
+  onCallAnswered(callback)  { this.on('call:answered', callback); }
+  onICECandidate(callback)  { this.on('call:ice-candidate', callback); }
+  onCallRejected(callback)  { this.on('call:rejected', callback); }
+  onCallEnded(callback)     { this.on('call:ended', callback); }
 
   // ─── User / stats ─────────────────────────────────────────────────────────
-  onUserStatus(callback) { this.on('user:status', callback); }
+  onUserStatus(callback)  { this.on('user:status', callback); }
   onStatsUpdate(callback) { this.on('stats:updated', callback); }
 }
 

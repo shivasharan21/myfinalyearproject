@@ -155,12 +155,22 @@ export const healthAPI = {
     }
   },
 
+  // FIX: was PUT — the route is PATCH
   updateHealthRecord: async (id, updates) => {
     try {
-      const response = await apiClient.put(`/health-records/${id}`, updates);
+      const response = await apiClient.patch(`/health-records/${id}`, updates);
       return response.data;
     } catch (error) {
       throw error.response?.data || { error: 'Failed to update health record' };
+    }
+  },
+
+  deleteHealthRecord: async (id) => {
+    try {
+      const response = await apiClient.delete(`/health-records/${id}`);
+      return response.data;
+    } catch (error) {
+      throw error.response?.data || { error: 'Failed to delete health record' };
     }
   },
 };
@@ -182,6 +192,25 @@ export const prescriptionsAPI = {
       return response.data;
     } catch (error) {
       throw error.response?.data || { error: 'Failed to create prescription' };
+    }
+  },
+
+  // FIX: added missing updatePrescription
+  updatePrescription: async (id, updates) => {
+    try {
+      const response = await apiClient.patch(`/prescriptions/${id}`, updates);
+      return response.data;
+    } catch (error) {
+      throw error.response?.data || { error: 'Failed to update prescription' };
+    }
+  },
+
+  deletePrescription: async (id) => {
+    try {
+      const response = await apiClient.delete(`/prescriptions/${id}`);
+      return response.data;
+    } catch (error) {
+      throw error.response?.data || { error: 'Failed to delete prescription' };
     }
   },
 
