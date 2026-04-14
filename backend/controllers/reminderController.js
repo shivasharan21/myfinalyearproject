@@ -44,4 +44,19 @@ const deleteReminder = async (req, res) => {
   }
 };
 
-module.exports = { getReminders, getTodayReminders, createReminder, deleteReminder };
+const logMedicine = async (req, res) => {
+  try {
+    const { skipped } = req.body;
+    const reminder = await Reminder.findById(req.params.id);
+    if (!reminder) return res.status(404).json({ error: 'Reminder not found' });
+    if (reminder.userId.toString() !== req.userId)
+      return res.status(403).json({ error: 'Unauthorized' });
+    reminder.logs.push({ takenAt: new Date(), skipped: skipped || false });
+    await reminder.save();
+    res.json(reminder);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to log medicine', details: error.message });
+  }
+};
+
+module.exports = { getReminders, getTodayReminders, createReminder, deleteReminder, logMedicine };

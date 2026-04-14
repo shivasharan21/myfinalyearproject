@@ -1,14 +1,9 @@
 // frontend/src/components/dashboard/DashboardCard.jsx
-import React from 'react';
+import React from "react";
 // FIX: DashboardOverview previously used require() inside a React component body,
 // which is invalid in ES-module / Vite environments and throws at runtime.
 // Icons are now imported at the top level.
-import {
-  HomeIcon,
-  CalendarIcon,
-  UsersIcon,
-  RefreshIcon,
-} from '../icons/icons';
+import { HomeIcon, CalendarIcon, UsersIcon, RefreshIcon } from "../icons/Icons";
 
 export const DashboardCard = ({
   title,
@@ -20,7 +15,7 @@ export const DashboardCard = ({
   loading = false,
   error = null,
   isEmpty = false,
-  emptyMessage = 'No data available',
+  emptyMessage = "No data available",
 }) => {
   return (
     <div className="bg-white rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow duration-200">
@@ -34,7 +29,9 @@ export const DashboardCard = ({
             )}
             <div className="flex-1 min-w-0">
               <h3 className="text-lg font-semibold text-gray-900">{title}</h3>
-              {subtitle && <p className="text-sm text-gray-600 mt-1">{subtitle}</p>}
+              {subtitle && (
+                <p className="text-sm text-gray-600 mt-1">{subtitle}</p>
+              )}
             </div>
           </div>
           {action && (
@@ -77,12 +74,12 @@ export const DashboardCard = ({
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const StatCard = ({ label, value, icon, trend, color = 'blue' }) => {
+export const StatCard = ({ label, value, icon, trend, color = "blue" }) => {
   const colorClasses = {
-    blue:   'bg-blue-50 text-blue-600 border-blue-200',
-    green:  'bg-green-50 text-green-600 border-green-200',
-    purple: 'bg-purple-50 text-purple-600 border-purple-200',
-    red:    'bg-red-50 text-red-600 border-red-200',
+    blue: "bg-blue-50 text-blue-600 border-blue-200",
+    green: "bg-green-50 text-green-600 border-green-200",
+    purple: "bg-purple-50 text-purple-600 border-purple-200",
+    red: "bg-red-50 text-red-600 border-red-200",
   };
 
   return (
@@ -93,8 +90,11 @@ export const StatCard = ({ label, value, icon, trend, color = 'blue' }) => {
           <div className="flex items-baseline gap-2 mt-2">
             <p className="text-3xl font-bold">{value}</p>
             {trend && (
-              <span className={`text-sm font-semibold ${trend.positive ? 'text-green-600' : 'text-red-600'}`}>
-                {trend.positive ? '+' : '-'}{trend.value}
+              <span
+                className={`text-sm font-semibold ${trend.positive ? "text-green-600" : "text-red-600"}`}
+              >
+                {trend.positive ? "+" : "-"}
+                {trend.value}
               </span>
             )}
           </div>
@@ -111,14 +111,23 @@ export const StatCard = ({ label, value, icon, trend, color = 'blue' }) => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const AppointmentListItem = ({ appointment, onAction, actions = [] }) => {
+export const AppointmentListItem = ({
+  appointment,
+  onAction,
+  actions = [],
+}) => {
   const getStatusColor = (status) => {
     switch (status) {
-      case 'confirmed':  return 'bg-green-100 text-green-800 border-green-200';
-      case 'pending':    return 'bg-yellow-100 text-yellow-800 border-yellow-200';
-      case 'completed':  return 'bg-blue-100 text-blue-800 border-blue-200';
-      case 'cancelled':  return 'bg-red-100 text-red-800 border-red-200';
-      default:           return 'bg-gray-100 text-gray-800 border-gray-200';
+      case "confirmed":
+        return "bg-green-100 text-green-800 border-green-200";
+      case "pending":
+        return "bg-yellow-100 text-yellow-800 border-yellow-200";
+      case "completed":
+        return "bg-blue-100 text-blue-800 border-blue-200";
+      case "cancelled":
+        return "bg-red-100 text-red-800 border-red-200";
+      default:
+        return "bg-gray-100 text-gray-800 border-gray-200";
     }
   };
 
@@ -137,8 +146,11 @@ export const AppointmentListItem = ({ appointment, onAction, actions = [] }) => 
             <p className="text-xs text-gray-500 mt-2">{appointment.reason}</p>
           )}
         </div>
-        <span className={`px-3 py-1 rounded-full text-xs font-semibold border ${getStatusColor(appointment.status)}`}>
-          {appointment.status.charAt(0).toUpperCase() + appointment.status.slice(1)}
+        <span
+          className={`px-3 py-1 rounded-full text-xs font-semibold border ${getStatusColor(appointment.status)}`}
+        >
+          {appointment.status.charAt(0).toUpperCase() +
+            appointment.status.slice(1)}
         </span>
       </div>
 
@@ -150,8 +162,8 @@ export const AppointmentListItem = ({ appointment, onAction, actions = [] }) => 
               onClick={() => onAction(action.id, appointment._id)}
               className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-all ${
                 action.primary
-                  ? 'bg-blue-600 text-white hover:bg-blue-700'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  ? "bg-blue-600 text-white hover:bg-blue-700"
+                  : "bg-gray-100 text-gray-700 hover:bg-gray-200"
               }`}
             >
               {action.label}
@@ -172,7 +184,9 @@ export const DashboardOverview = ({ stats, appointments, onRefresh }) => {
       <div className="flex justify-between items-center mb-8">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
-          <p className="text-gray-600 mt-1">Welcome back! Here's your overview</p>
+          <p className="text-gray-600 mt-1">
+            Welcome back! Here's your overview
+          </p>
         </div>
         <button
           onClick={onRefresh}
@@ -184,9 +198,24 @@ export const DashboardOverview = ({ stats, appointments, onRefresh }) => {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-        <StatCard label="Total Appointments" value={stats?.totalAppointments || 0} icon={<CalendarIcon />} color="blue" />
-        <StatCard label="Upcoming"           value={stats?.upcomingAppointments || 0} icon={<HomeIcon />} color="green" />
-        <StatCard label="Patients"           value={stats?.totalPatients || 0} icon={<UsersIcon />} color="purple" />
+        <StatCard
+          label="Total Appointments"
+          value={stats?.totalAppointments || 0}
+          icon={<CalendarIcon />}
+          color="blue"
+        />
+        <StatCard
+          label="Upcoming"
+          value={stats?.upcomingAppointments || 0}
+          icon={<HomeIcon />}
+          color="green"
+        />
+        <StatCard
+          label="Patients"
+          value={stats?.totalPatients || 0}
+          icon={<UsersIcon />}
+          color="purple"
+        />
       </div>
 
       <DashboardCard
@@ -195,7 +224,7 @@ export const DashboardOverview = ({ stats, appointments, onRefresh }) => {
         icon={<CalendarIcon />}
         isEmpty={!appointments || appointments.length === 0}
         emptyMessage="No upcoming appointments scheduled"
-        action={{ label: 'Book New', onClick: () => {} }}
+        action={{ label: "Book New", onClick: () => {} }}
       >
         <div className="space-y-3">
           {(appointments || []).slice(0, 5).map((appointment) => (
@@ -203,13 +232,13 @@ export const DashboardOverview = ({ stats, appointments, onRefresh }) => {
               key={appointment._id}
               appointment={appointment}
               onAction={(actionId, appointmentId) => {
-                console.log('Action:', actionId, 'Appointment:', appointmentId);
+                console.log("Action:", actionId, "Appointment:", appointmentId);
               }}
               actions={
-                appointment.status === 'confirmed'
+                appointment.status === "confirmed"
                   ? [
-                      { id: 'join', label: 'Join Call', primary: true },
-                      { id: 'cancel', label: 'Cancel' },
+                      { id: "join", label: "Join Call", primary: true },
+                      { id: "cancel", label: "Cancel" },
                     ]
                   : []
               }

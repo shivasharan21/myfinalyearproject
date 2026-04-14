@@ -48,15 +48,9 @@ const initSocket = (server, allowedOrigins) => {
       if (userId) {
         userSockets.set(userId.toString(), socket.id);
         io.emit('user:status', { userId, status: 'online' });
+        console.log('✓ user:online received. userId:', userId, '| type:', typeof userId);
       }
     });
-    socket.on('user:online', (userId) => {
-  console.log('user:online received. userId:', userId, '| type:', typeof userId); // ADD THIS
-  if (userId) {
-    userSockets.set(userId.toString(), socket.id);
-    io.emit('user:status', { userId, status: 'online' });
-  }
-});
 
     socket.on('call:initiate', (data) => {
       const { appointmentId, callerId, callerName, receiverId, offer } = data;

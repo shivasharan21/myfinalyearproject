@@ -61,4 +61,19 @@ const getMe = async (req, res) => {
   }
 };
 
-module.exports = { register, login, getMe };
+const updateProfile = async (req, res) => {
+  try {
+    const { name, phone, specialization } = req.body;
+    const user = await User.findByIdAndUpdate(
+      req.userId,
+      { ...(name && { name }), ...(phone && { phone }), ...(specialization && { specialization }) },
+      { new: true }
+    ).select('-password');
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    res.json(user);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to update profile', details: error.message });
+  }
+};
+
+module.exports = { register, login, getMe, updateProfile };
