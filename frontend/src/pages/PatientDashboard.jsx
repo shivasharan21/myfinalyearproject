@@ -8,6 +8,7 @@ import DiabetesPrediction from "../components/DiabetesPrediction";
 import AppointmentBooking from "../components/AppointmentBooking";
 import { Bell, Phone, X, Calendar, Check, AlertCircle } from "lucide-react";
 import HeartDiseasePrediction from "../components/HeartDiseasePrediction";
+import PneumoniaPrediction from "../components/PneumoniaPrediction";
 // FIX: missing imports — these components were referenced but never imported
 import Prescriptions from "../components/Prescriptions";
 import HealthRecords from "../components/HealthRecords";
@@ -396,6 +397,8 @@ function PatientDashboard() {
         return <DiabetesPrediction />;
       case "heart":
         return <HeartDiseasePrediction />;
+      case "pneumonia":
+        return <PneumoniaPrediction />;
       case "appointments":
         return (
           <AppointmentBooking
@@ -514,6 +517,13 @@ function PatientDashboard() {
                 label="Heart Check"
                 active={activeTab === "heart"}
                 onClick={() => setActiveTab("heart")}
+                badge="AI"
+              />
+              <NavButton
+                icon={<HeartIcon />}
+                label="Pneumonia Check"
+                active={activeTab === "pneumonia"}
+                onClick={() => setActiveTab("pneumonia")}
                 badge="AI"
               />
               <NavButton

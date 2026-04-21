@@ -2,11 +2,13 @@ const { spawn }              = require('child_process');
 const path                   = require('path');
 const DiabetesPrediction     = require('../models/DiabetesPrediction');
 const HeartDiseasePrediction = require('../models/HeartDiseasePrediction');
+const PneumoniaPrediction    = require('../models/PneumoniaPrediction');
 
 // Absolute paths — work regardless of where Node is started from
 const ML_DIR          = path.join(__dirname, '..', 'ml_model');
 const DIABETES_SCRIPT = path.join(ML_DIR, 'predict.py');
 const HEART_SCRIPT    = path.join(ML_DIR, 'heart_predict.py');
+const PNEUMONIA_SCRIPT = path.join(ML_DIR, 'pneumonia_predict.py');
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -125,4 +127,37 @@ const getHeartPredictions = async (req, res) => {
   }
 };
 
-module.exports = { predictDiabetes, getDiabetesPredictions, predictHeartDisease, getHeartPredictions };
+// ─── Pneumonia ───────────────────────────────────────────────────────────────
+
+const predictPneumonia = async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No image file uploaded' });
+
+    // Convert image buffer to base64
+    const imageBase64 = req.file.buffer.toString('base64');
+    const inputData = { image: imageBase64 };
+
+    const prediction = await runPythonScript(PNEUMONIA_SCRIPT, inputData);
+    await new PneumoniaPrediction({
+      userId: req.userId,
+      prediction: prediction.prediction,
+      probability: prediction.probability,
+      risk: prediction.risk
+    }).save();
+
+    res.json(prediction);
+  } catch (error) {
+    console.error('[predictPneumonia]', error.message);
+    res.status(500).json({ error: 'Prediction failed', details: error.message });
+  }
+};
+
+const getPneumoniaPredictions = async (req, res) => {
+  try {
+    res.json(await PneumoniaPrediction.find({ userId: req.userId }).sort({ createdAt: -1 }).limit(10));
+  } catch {
+    res.status(500).json({ error: 'Failed to fetch predictions' });
+  }
+};
+
+module.exports = { predictDiabetes, getDiabetesPredictions, predictHeartDisease, getHeartPredictions, predictPneumonia, getPneumoniaPredictions };
