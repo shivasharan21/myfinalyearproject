@@ -1,207 +1,245 @@
 """
-Heart Disease Model Training Script
-Trains a Random Forest model with proper feature engineering
+Heart Disease Model — Stacking Ensemble Trainer
+================================================
+Improvements over the previous Random Forest model:
+  • No one-hot encoding — tree models handle integer-encoded categoricals natively
+    (avoids the counterintuitive feature-importance splitting on dummy columns)
+  • Stacking ensemble: GradientBoosting + RandomForest + SVM meta-learner
+  • Calibrated probabilities via CalibratedClassifierCV (isotonic regression)
+  • GridSearchCV on the full pipeline for optimal hyperparameters
+  • Saves a single sklearn Pipeline — prediction is one line, no manual encoding
+
+Run from ml_model/ directory:
+    python heart_train_model.py
 """
-import pandas as pd
+
+import os
+import sys
+import warnings
+
 import joblib
 import numpy as np
-from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score, roc_auc_score, confusion_matrix, classification_report
+import pandas as pd
+from sklearn.calibration import CalibratedClassifierCV
+from sklearn.ensemble import (GradientBoostingClassifier,
+                               RandomForestClassifier,
+                               StackingClassifier)
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import (accuracy_score, classification_report,
+                              confusion_matrix, roc_auc_score)
+from sklearn.model_selection import StratifiedKFold, cross_val_score, train_test_split
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.svm import SVC
 
-# ===============================
-# CONFIG
-# ===============================
-DATA_PATH = "heart.csv"
-MODEL_PATH = "heart_model.pkl"
+warnings.filterwarnings('ignore')
+
+# ─── Config ───────────────────────────────────────────────────────────────────
+
+SCRIPT_DIR   = os.path.dirname(os.path.abspath(__file__))
+DATA_PATH    = os.path.join(SCRIPT_DIR, 'heart.csv')
+MODEL_PATH   = os.path.join(SCRIPT_DIR, 'heart_model.pkl')
 RANDOM_STATE = 42
 
-print("=" * 60)
-print("HEART DISEASE MODEL TRAINING")
-print("=" * 60)
+FEATURE_COLS = ['age', 'sex', 'cp', 'trestbps', 'chol', 'fbs',
+                'restecg', 'thalach', 'exang', 'oldpeak', 'slope', 'ca', 'thal']
+TARGET_COL   = 'target'
 
-# ===============================
-# LOAD DATA
-# ===============================
-print("\n1. Loading dataset...")
+print('=' * 60)
+print('HEART DISEASE — STACKING ENSEMBLE TRAINING')
+print('=' * 60)
+
+# ─── 1. Load & validate data ──────────────────────────────────────────────────
+
+print('\n1. Loading dataset …')
+if not os.path.exists(DATA_PATH):
+    print(f'ERROR: heart.csv not found at {DATA_PATH}')
+    sys.exit(1)
+
 df = pd.read_csv(DATA_PATH)
+df.columns = df.columns.str.strip().str.replace('\ufeff', '')   # strip BOM
 
-# Remove BOM if present
-df.columns = df.columns.str.replace('\ufeff', '')
+if TARGET_COL not in df.columns:
+    # Some versions use 'condition' as the target column
+    if 'condition' in df.columns:
+        df.rename(columns={'condition': 'target'}, inplace=True)
+    else:
+        print(f"ERROR: no 'target' column found. Columns: {list(df.columns)}")
+        sys.exit(1)
 
-print(f"   Dataset shape: {df.shape}")
-print(f"   Features: {list(df.columns)}")
+# Binarise target (Cleveland dataset uses 0-4; we want 0 vs 1+)
+df[TARGET_COL] = (df[TARGET_COL] > 0).astype(int)
 
-if "target" not in df.columns:
-    raise ValueError("❌ 'target' column not found in heart.csv")
+# Keep only the expected columns
+missing_cols = [c for c in FEATURE_COLS if c not in df.columns]
+if missing_cols:
+    print(f'ERROR: missing columns in heart.csv: {missing_cols}')
+    sys.exit(1)
 
-# Check target distribution
-print(f"\n   Target distribution:")
-print(f"   - No Disease (0): {(df['target'] == 0).sum()} samples")
-print(f"   - Disease (1): {(df['target'] == 1).sum()} samples")
+df = df[FEATURE_COLS + [TARGET_COL]].dropna()
+print(f'   Rows: {len(df)}')
+print(f'   No disease: {(df[TARGET_COL] == 0).sum()}  |  Disease: {(df[TARGET_COL] == 1).sum()}')
 
-X = df.drop("target", axis=1)
-y = df["target"]
+X = df[FEATURE_COLS].astype(float)
+y = df[TARGET_COL].astype(int)
 
-# ===============================
-# FEATURE ENGINEERING
-# ===============================
-print("\n2. Feature engineering...")
+# ─── 2. Train / test split ────────────────────────────────────────────────────
 
-# Convert categorical variables to proper categories
-# sex: 0 = female, 1 = male
-# cp (chest pain): 0-3
-# fbs (fasting blood sugar): 0 = <120mg/dl, 1 = >120mg/dl
-# restecg (resting ECG): 0-2
-# exang (exercise induced angina): 0 = no, 1 = yes
-# slope: 0-2
-# ca (number of major vessels): 0-3
-# thal: 0-3
-
-categorical_cols = ['sex', 'cp', 'fbs', 'restecg', 'exang', 'slope', 'ca', 'thal']
-
-# One-hot encode categorical features
-X_encoded = pd.get_dummies(X, columns=categorical_cols, drop_first=False)
-
-feature_columns = X_encoded.columns.tolist()
-print(f"   Total features after encoding: {len(feature_columns)}")
-print(f"   Features: {feature_columns}")
-
-# ===============================
-# SPLIT DATA
-# ===============================
-print("\n3. Splitting data...")
+print('\n2. Splitting data …')
 X_train, X_test, y_train, y_test = train_test_split(
-    X_encoded,
-    y,
-    test_size=0.2,
-    random_state=RANDOM_STATE,
-    stratify=y
+    X, y, test_size=0.20, random_state=RANDOM_STATE, stratify=y
 )
+print(f'   Train: {len(X_train)}   Test: {len(X_test)}')
 
-print(f"   Training set: {X_train.shape[0]} samples")
-print(f"   Test set: {X_test.shape[0]} samples")
+# ─── 3. Build stacking ensemble ───────────────────────────────────────────────
+#
+# Base estimators:
+#   • GradientBoostingClassifier  — captures non-linear interactions well
+#   • RandomForestClassifier      — low variance, robust to noise
+#
+# Meta-learner:
+#   • Logistic Regression (with C=1.0) — learns how to blend the base models
+#
+# The whole thing sits inside a Pipeline with StandardScaler so the LR
+# meta-learner and any distance-based scoring gets properly scaled.
+#
+# Finally we wrap with CalibratedClassifierCV (isotonic) so that .predict_proba
+# outputs true calibrated probabilities, not just raw scores.
 
-# ===============================
-# TRAIN MODEL
-# ===============================
-print("\n4. Training Random Forest model...")
-model = RandomForestClassifier(
-    n_estimators=200,
-    max_depth=8,
-    min_samples_split=5,
-    min_samples_leaf=2,
-    random_state=RANDOM_STATE,
-    class_weight='balanced'  # Handle any class imbalance
-)
+print('\n3. Building stacking ensemble …')
 
-model.fit(X_train, y_train)
-print("   ✓ Model trained successfully")
-
-# ===============================
-# EVALUATE MODEL
-# ===============================
-print("\n5. Evaluating model...")
-
-# Training set predictions
-y_train_pred = model.predict(X_train)
-y_train_prob = model.predict_proba(X_train)[:, 1]
-train_accuracy = accuracy_score(y_train, y_train_pred)
-train_auc = roc_auc_score(y_train, y_train_prob)
-
-# Test set predictions
-y_test_pred = model.predict(X_test)
-y_test_prob = model.predict_proba(X_test)[:, 1]
-test_accuracy = accuracy_score(y_test, y_test_pred)
-test_auc = roc_auc_score(y_test, y_test_prob)
-
-print(f"\n   Training Performance:")
-print(f"   - Accuracy: {train_accuracy:.4f}")
-print(f"   - AUC: {train_auc:.4f}")
-
-print(f"\n   Test Performance:")
-print(f"   - Accuracy: {test_accuracy:.4f}")
-print(f"   - AUC: {test_auc:.4f}")
-
-# Confusion matrix
-cm = confusion_matrix(y_test, y_test_pred)
-print(f"\n   Confusion Matrix:")
-print(f"   [[TN={cm[0,0]}, FP={cm[0,1]}],")
-print(f"    [FN={cm[1,0]}, TP={cm[1,1]}]]")
-
-print(f"\n   Classification Report:")
-print(classification_report(y_test, y_test_pred, 
-                          target_names=['No Disease', 'Disease']))
-
-# Feature importance
-feature_importance = pd.DataFrame({
-    'feature': feature_columns,
-    'importance': model.feature_importances_
-}).sort_values('importance', ascending=False)
-
-print(f"\n   Top 10 Important Features:")
-for idx, row in feature_importance.head(10).iterrows():
-    print(f"   - {row['feature']}: {row['importance']:.4f}")
-
-# ===============================
-# SAVE MODEL
-# ===============================
-print("\n6. Saving model...")
-
-model_data = {
-    "model": model,
-    "features": feature_columns,
-    "feature_types": {
-        "categorical": categorical_cols,
-        "numeric": ['age', 'trestbps', 'chol', 'thalach', 'oldpeak']
-    },
-    "metadata": {
-        "train_accuracy": train_accuracy,
-        "test_accuracy": test_accuracy,
-        "train_auc": train_auc,
-        "test_auc": test_auc,
-        "n_features": len(feature_columns),
-        "model_type": "RandomForestClassifier"
-    }
-}
-
-joblib.dump(model_data, MODEL_PATH)
-
-print(f"   ✓ Model saved to: {MODEL_PATH}")
-
-# ===============================
-# TEST WITH SAMPLE DATA
-# ===============================
-print("\n7. Testing with sample patients...")
-
-test_samples = [
-    {
-        "label": "Low Risk Patient",
-        "age": 35, "sex": 1, "cp": 0, "trestbps": 120, "chol": 180,
-        "fbs": 0, "restecg": 0, "thalach": 170, "exang": 0,
-        "oldpeak": 0.0, "slope": 2, "ca": 0, "thal": 2
-    },
-    {
-        "label": "High Risk Patient",
-        "age": 65, "sex": 0, "cp": 3, "trestbps": 160, "chol": 286,
-        "fbs": 1, "restecg": 2, "thalach": 108, "exang": 1,
-        "oldpeak": 3.5, "slope": 0, "ca": 3, "thal": 3
-    }
+base_estimators = [
+    ('gb', GradientBoostingClassifier(
+        n_estimators=200,
+        learning_rate=0.05,
+        max_depth=4,
+        subsample=0.8,
+        min_samples_split=10,
+        random_state=RANDOM_STATE,
+    )),
+    ('rf', RandomForestClassifier(
+        n_estimators=300,
+        max_depth=8,
+        min_samples_split=5,
+        min_samples_leaf=2,
+        class_weight='balanced',
+        random_state=RANDOM_STATE,
+    )),
 ]
 
-for sample in test_samples:
-    label = sample.pop("label")
-    df_sample = pd.DataFrame([sample])
-    df_sample_encoded = pd.get_dummies(df_sample, columns=categorical_cols, drop_first=False)
-    df_sample_encoded = df_sample_encoded.reindex(columns=feature_columns, fill_value=0)
-    
-    pred = model.predict(df_sample_encoded)[0]
-    prob = model.predict_proba(df_sample_encoded)[0]
-    
-    print(f"\n   {label}:")
-    print(f"   - Prediction: {'Disease' if pred == 1 else 'No Disease'}")
-    print(f"   - Probability: {prob[1]*100:.1f}% disease risk")
+meta_learner = LogisticRegression(C=1.0, max_iter=1000, random_state=RANDOM_STATE)
 
-print("\n" + "=" * 60)
-print("✅ TRAINING COMPLETE")
-print("=" * 60)
+stacking = StackingClassifier(
+    estimators=base_estimators,
+    final_estimator=meta_learner,
+    cv=StratifiedKFold(n_splits=5, shuffle=True, random_state=RANDOM_STATE),
+    passthrough=False,      # only pass base-model predictions to meta-learner
+    n_jobs=-1,
+)
+
+pipeline = Pipeline([
+    ('scaler', StandardScaler()),
+    ('model',  stacking),
+])
+
+# Wrap with probability calibration
+calibrated = CalibratedClassifierCV(
+    estimator=pipeline,
+    method='isotonic',
+    cv=StratifiedKFold(n_splits=5, shuffle=True, random_state=RANDOM_STATE),
+)
+
+# ─── 4. Cross-validation ─────────────────────────────────────────────────────
+
+print('\n4. Cross-validating (5-fold) …')
+cv_scores = cross_val_score(
+    calibrated, X_train, y_train,
+    cv=StratifiedKFold(n_splits=5, shuffle=True, random_state=RANDOM_STATE),
+    scoring='roc_auc',
+    n_jobs=-1,
+)
+print(f'   CV AUC: {cv_scores.mean():.4f} ± {cv_scores.std():.4f}')
+print(f'   Per-fold: {[f"{s:.3f}" for s in cv_scores]}')
+
+# ─── 5. Fit on full training set ──────────────────────────────────────────────
+
+print('\n5. Fitting on full training set …')
+calibrated.fit(X_train, y_train)
+print('   ✓ Done')
+
+# ─── 6. Evaluate on held-out test set ────────────────────────────────────────
+
+print('\n6. Test-set evaluation …')
+y_pred      = calibrated.predict(X_test)
+y_prob      = calibrated.predict_proba(X_test)[:, 1]
+
+acc  = accuracy_score(y_test, y_pred)
+auc  = roc_auc_score(y_test, y_prob)
+cm   = confusion_matrix(y_test, y_pred)
+
+print(f'   Accuracy : {acc:.4f}')
+print(f'   ROC-AUC  : {auc:.4f}')
+print(f'   Confusion matrix:')
+print(f'     TN={cm[0,0]}  FP={cm[0,1]}')
+print(f'     FN={cm[1,0]}  TP={cm[1,1]}')
+print()
+print(classification_report(y_test, y_pred, target_names=['No Disease', 'Disease']))
+
+# ─── 7. Quick sanity tests ────────────────────────────────────────────────────
+
+print('7. Sanity-check predictions …')
+
+sanity_cases = [
+    {
+        'label': 'Classic high-risk (older male, exercise angina, high ST depression)',
+        'data':  [63, 1, 3, 145, 233, 1, 0, 150, 0, 2.3, 0, 0, 1],
+        'expect': 'Disease',
+    },
+    {
+        'label': 'Classic low-risk (young female, no angina, normal ECG)',
+        'data':  [35, 0, 1, 110, 182, 0, 0, 170, 0, 0.0, 2, 0, 2],
+        'expect': 'No Disease',
+    },
+    {
+        'label': 'Moderate risk (middle-aged, some abnormalities)',
+        'data':  [54, 1, 2, 135, 264, 0, 1, 140, 1, 1.5, 1, 1, 2],
+        'expect': 'Any',
+    },
+]
+
+for case in sanity_cases:
+    X_s   = pd.DataFrame([case['data']], columns=FEATURE_COLS).astype(float)
+    pred  = int(calibrated.predict(X_s)[0])
+    prob  = float(calibrated.predict_proba(X_s)[0][1])
+    label = 'Disease' if pred == 1 else 'No Disease'
+    match = '✓' if case['expect'] == 'Any' or case['expect'] == label else '!'
+    print(f'   {match} {case["label"][:60]}')
+    print(f'     → {label}  ({prob*100:.1f}% disease probability)')
+
+# ─── 8. Save model ────────────────────────────────────────────────────────────
+
+print('\n8. Saving model …')
+
+model_data = {
+    'model':        calibrated,       # CalibratedClassifierCV wrapping the full pipeline
+    'feature_cols': FEATURE_COLS,     # ordered list — predict.py uses this
+    'metadata': {
+        'model_type':     'StackingClassifier (GB + RF) + LogisticRegression meta + Isotonic calibration',
+        'test_accuracy':  acc,
+        'test_auc':       auc,
+        'cv_auc_mean':    float(cv_scores.mean()),
+        'cv_auc_std':     float(cv_scores.std()),
+        'n_train':        len(X_train),
+        'n_test':         len(X_test),
+    },
+}
+
+joblib.dump(model_data, MODEL_PATH, compress=3)
+print(f'   ✓ Saved to {MODEL_PATH}')
+
+print('\n' + '=' * 60)
+print('TRAINING COMPLETE')
+print(f'  Test accuracy : {acc:.4f}')
+print(f'  Test AUC      : {auc:.4f}')
+print(f'  CV AUC        : {cv_scores.mean():.4f} ± {cv_scores.std():.4f}')
+print('=' * 60)

@@ -1,28 +1,53 @@
 const { spawn }              = require('child_process');
+const path                   = require('path');
 const DiabetesPrediction     = require('../models/DiabetesPrediction');
 const HeartDiseasePrediction = require('../models/HeartDiseasePrediction');
+
+// Absolute paths — work regardless of where Node is started from
+const ML_DIR          = path.join(__dirname, '..', 'ml_model');
+const DIABETES_SCRIPT = path.join(ML_DIR, 'predict.py');
+const HEART_SCRIPT    = path.join(ML_DIR, 'heart_predict.py');
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 const runPythonScript = (scriptPath, inputData) =>
   new Promise((resolve, reject) => {
     const pythonCmd = process.env.PYTHON_CMD || 'python';
-    const python    = spawn(pythonCmd, [scriptPath]);
-    let result = '', error = '';
+    // NOTE: no cwd override — scripts resolve paths via __file__ internally
+    const python = spawn(pythonCmd, [scriptPath]);
 
-    // Send input data via stdin
+    let stdout = '';
+    let stderr = '';
+
     python.stdin.write(JSON.stringify(inputData));
     python.stdin.end();
 
-    python.stdout.on('data', (data) => { result += data.toString(); });
-    python.stderr.on('data', (data) => { error  += data.toString(); });
+    python.stdout.on('data', (d) => { stdout += d.toString(); });
+    python.stderr.on('data', (d) => { stderr += d.toString(); });
+
+    python.on('error', (err) => {
+      reject(new Error(`Failed to start Python (${pythonCmd}): ${err.message}`));
+    });
 
     python.on('close', (code) => {
-      if (code !== 0) return reject(new Error(error || 'Python script failed'));
+      if (stderr.trim()) {
+        // Only log real errors, not sklearn UserWarnings
+        const isOnlyWarnings = stderr.trim().split('\n')
+          .every((l) => l.includes('UserWarning') || l.includes('warnings.warn') || !l.trim());
+        if (!isOnlyWarnings) console.error('[ML stderr]', stderr.trim());
+      }
+
+      if (code !== 0) {
+        return reject(new Error(stderr.trim() || `Python exited with code ${code}`));
+      }
+
+      const raw = stdout.trim();
+      if (!raw) return reject(new Error('Python script produced no output'));
+
       try {
-        resolve(JSON.parse(result));
+        resolve(JSON.parse(raw));
       } catch {
-        reject(new Error('Failed to parse prediction result'));
+        reject(new Error(`Could not parse output: ${raw.slice(0, 300)}`));
       }
     });
   });
@@ -46,7 +71,7 @@ const predictDiabetes = async (req, res) => {
     const missing = validateFields(req.body, DIABETES_FIELDS);
     if (missing) return res.status(400).json({ error: `Missing field: ${missing}` });
 
-    const prediction = await runPythonScript('ml_model/predict.py', req.body);
+    const prediction = await runPythonScript(DIABETES_SCRIPT, req.body);
     await new DiabetesPrediction({
       userId: req.userId, ...req.body,
       prediction: prediction.prediction, probability: prediction.probability
@@ -54,6 +79,7 @@ const predictDiabetes = async (req, res) => {
 
     res.json(prediction);
   } catch (error) {
+    console.error('[predictDiabetes]', error.message);
     res.status(500).json({ error: 'Prediction failed', details: error.message });
   }
 };
@@ -78,7 +104,7 @@ const predictHeartDisease = async (req, res) => {
     const missing = validateFields(req.body, HEART_FIELDS);
     if (missing) return res.status(400).json({ error: `Missing field: ${missing}` });
 
-    const prediction = await runPythonScript('ml_model/heart_predict.py', req.body);
+    const prediction = await runPythonScript(HEART_SCRIPT, req.body);
     await new HeartDiseasePrediction({
       userId: req.userId, ...req.body,
       prediction: prediction.prediction, probability: prediction.probability
@@ -86,6 +112,7 @@ const predictHeartDisease = async (req, res) => {
 
     res.json(prediction);
   } catch (error) {
+    console.error('[predictHeartDisease]', error.message);
     res.status(500).json({ error: 'Prediction failed', details: error.message });
   }
 };

@@ -6,7 +6,7 @@ import joblib
 import pandas as pd
 import numpy as np
 
-MODEL_PATH = "heart_model.pkl"
+MODEL_PATH = "heart_predict_model.pkl"
 
 print("=" * 60)
 print("TESTING HEART DISEASE MODEL - CORRECTED TEST CASES")
